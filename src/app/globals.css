@@ -1,0 +1,52 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background:        0 0% 100%;
+    --foreground:        215 25% 12%;
+    --card:              0 0% 100%;
+    --card-foreground:   215 25% 12%;
+    --popover:           0 0% 100%;
+    --popover-foreground:215 25% 12%;
+    --primary:           214 59% 29%;
+    --primary-foreground:0 0% 98%;
+    --secondary:         210 14% 93%;
+    --secondary-foreground:215 25% 12%;
+    --muted:             210 14% 96%;
+    --muted-foreground:  215 13% 45%;
+    --accent:            210 14% 93%;
+    --accent-foreground: 215 25% 12%;
+    --destructive:       0 72% 51%;
+    --destructive-foreground:0 0% 98%;
+    --border:            214 17% 88%;
+    --input:             214 17% 88%;
+    --ring:              214 59% 29%;
+    --radius:            0.5rem;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: "Noto Sans KR", sans-serif;
+  }
+  button, a, [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
+@layer utilities {
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+  .pt-safe { padding-top: env(safe-area-inset-top); }
+  .text-balance { text-wrap: balance; }
+}
