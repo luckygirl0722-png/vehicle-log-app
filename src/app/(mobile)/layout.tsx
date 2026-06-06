@@ -10,6 +10,13 @@ export default async function MobileLayout({ children }: { children: React.React
   const { data: driver } = await supabase
     .from("drivers").select("name").eq("user_id", user.id).single();
 
+  const navItems = [
+    { href: "/",               icon: "🏠", label: "홈" },
+    { href: "/trip/start",     icon: "🚗", label: "운행시작" },
+    { href: "/vehicle-trips",  icon: "📋", label: "차량기록" },
+    { href: "/my-trips",       icon: "📝", label: "내 기록" },
+  ];
+
   return (
     <div className="min-h-screen bg-muted flex flex-col max-w-md mx-auto">
       <header className="bg-primary text-primary-foreground px-4 py-3 flex items-center justify-between sticky top-0 z-40">
@@ -19,12 +26,18 @@ export default async function MobileLayout({ children }: { children: React.React
         </div>
         <LogoutButton className="text-xs text-primary-foreground/80" />
       </header>
-      <main className="flex-1 overflow-y-auto">{children}</main>
-      <nav className="bg-background border-t border-border sticky bottom-0">
+
+      <main className="flex-1 overflow-y-auto pb-16">{children}</main>
+
+      <nav className="bg-background border-t border-border sticky bottom-0 z-40">
         <div className="flex">
-          <a href="/" className="flex-1 flex flex-col items-center py-3 text-xs text-muted-foreground gap-1">홈</a>
-          <a href="/trip/start" className="flex-1 flex flex-col items-center py-3 text-xs text-muted-foreground gap-1">운행시작</a>
-          <a href="/my-trips" className="flex-1 flex flex-col items-center py-3 text-xs text-muted-foreground gap-1">내 기록</a>
+          {navItems.map(({ href, icon, label }) => (
+            <a key={href} href={href}
+              className="flex-1 flex flex-col items-center py-2.5 text-xs text-muted-foreground gap-0.5 hover:text-primary transition-colors">
+              <span className="text-base">{icon}</span>
+              <span>{label}</span>
+            </a>
+          ))}
         </div>
       </nav>
     </div>
