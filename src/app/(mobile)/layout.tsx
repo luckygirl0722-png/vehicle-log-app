@@ -1,8 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import LogoutButton from "@/components/auth/LogoutButton";
-import OfflineBanner from "@/components/offline/OfflineBanner";
-import InstallPrompt from "@/components/offline/InstallPrompt";
 
 /**
  * 모바일(운전자) 레이아웃
@@ -35,9 +33,6 @@ export default async function MobileLayout({
 
   return (
     <div className="min-h-screen bg-muted flex flex-col max-w-md mx-auto">
-      {/* 오프라인 배너 */}
-      <OfflineBanner />
-
       {/* 상단 헤더 */}
       <header className="bg-primary text-primary-foreground px-4 py-3 flex items-center justify-between sticky top-0 z-40 pt-safe">
         <div>
@@ -51,8 +46,6 @@ export default async function MobileLayout({
 
       {/* 본문 */}
       <main className="flex-1 overflow-y-auto">
-        {/* PWA 설치 유도 배너 */}
-        <InstallPrompt />
         {children}
       </main>
 
