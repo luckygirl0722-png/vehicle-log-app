@@ -11,6 +11,7 @@ export const TripStartSchema = z.object({
     .min(0, "출발 km는 0 이상이어야 합니다."),
   purpose:              z.string().min(1, "업무 목적을 입력하세요.").max(200),
   departure_time:       z.string().datetime({ offset: true }).optional(),
+  trip_type:            z.enum(["업무", "출퇴근"]).default("업무"),
 });
 
 /** 도착 등록 스키마 */
