@@ -1,7 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { formatKRW } from "@/lib/utils";
 
 export const metadata = { title: "운행 완료 — 차량 운행일지" };
 
@@ -22,9 +21,8 @@ export default async function TripCompletePage({ params }: Props) {
   if (!trip.arrival_time) redirect(`/trip/${params.id}/end`);
 
   const depTime = new Date(trip.departure_time);
-  const arrTime = new Date(trip.arrival_time);
-  const durationMs  = arrTime.getTime() - depTime.getTime();
-  const durationMin = Math.round(durationMs / 60000);
+  const arrTime = new Date(trip.arrival_time as string);
+  const durationMin = Math.round((arrTime.getTime() - depTime.getTime()) / 60000);
   const hours   = Math.floor(durationMin / 60);
   const minutes = durationMin % 60;
   const durationLabel = hours > 0 ? `${hours}시간 ${minutes}분` : `${minutes}분`;
@@ -34,85 +32,69 @@ export default async function TripCompletePage({ params }: Props) {
   const dateFormat = (d: Date) =>
     d.toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
 
+  const statusMap: Record<string, string> = {
+    draft:     "작성 중 — 월말에 제출해주세요",
+    submitted: "승인 대기 중",
+    approved:  "승인 완료",
+    rejected:  "반려됨 — 수정 후 재제출하세요",
+  };
+
   return (
     <div className="p-4 space-y-5">
-
-      {/* 완료 헤더 */}
       <div className="text-center py-6 space-y-3">
         <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto">
           <span className="text-4xl">✅</span>
         </div>
         <div>
-          <p className="text-xl font-bold text-foreground">운행 완료!</p>
+          <p className="text-xl font-bold">운행 완료!</p>
           <p className="text-sm text-muted-foreground mt-1">{dateFormat(depTime)}</p>
         </div>
       </div>
 
-      {/* 운행 요약 카드 */}
       <div className="rounded-2xl bg-background border border-border overflow-hidden">
-        {/* 핵심 지표 */}
         <div className="grid grid-cols-3 divide-x divide-border border-b border-border">
           {[
             { label: "운행거리", value: `${(trip.distance_km ?? 0).toLocaleString("ko-KR")}`, unit: "km" },
             { label: "소요시간", value: durationLabel, unit: "" },
-            { label: "통행료",   value: trip.toll_fee > 0 ? trip.toll_fee.toLocaleString("ko-KR") : "없음", unit: trip.toll_fee > 0 ? "원" : "" },
+            { label: "통행료", value: trip.toll_fee > 0 ? trip.toll_fee.toLocaleString("ko-KR") : "없음", unit: trip.toll_fee > 0 ? "원" : "" },
           ].map(({ label, value, unit }) => (
             <div key={label} className="flex flex-col items-center py-4 px-2">
               <span className="text-xs text-muted-foreground mb-1">{label}</span>
-              <span className="text-lg font-bold text-foreground">{value}</span>
+              <span className="text-lg font-bold">{value}</span>
               {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
             </div>
           ))}
         </div>
 
-        {/* 상세 */}
         <div className="p-4 space-y-3 text-sm">
-          {[
-            ["차량",   `${(trip.vehicles as any)?.plate_number ?? "—"} · ${(trip.vehicles as any)?.model ?? ""}`],
-            ["출발지",  trip.departure_location],
-            ["도착지",  trip.arrival_location ?? "—"],
+          {([
+            ["출발지", trip.departure_location],
+            ["도착지", trip.arrival_location ?? "—"],
             ["출발 km", `${trip.departure_km.toLocaleString("ko-KR")} km`],
             ["도착 km", `${(trip.arrival_km ?? 0).toLocaleString("ko-KR")} km`],
-            ["출발",    timeFormat(depTime)],
-            ["도착",    timeFormat(arrTime)],
-            ["목적",    trip.purpose],
-          ].map(([label, value]) => (
+            ["출발", timeFormat(depTime)],
+            ["도착", timeFormat(arrTime)],
+            ["목적", trip.purpose],
+          ] as [string, string][]).map(([label, value]) => (
             <div key={label} className="flex justify-between items-start gap-4">
               <span className="text-muted-foreground shrink-0 w-16">{label}</span>
               <span className="font-medium text-right">{value}</span>
             </div>
           ))}
-          {trip.note && (
-            <div className="flex justify-between items-start gap-4">
-              <span className="text-muted-foreground shrink-0 w-16">비고</span>
-              <span className="font-medium text-right">{trip.note}</span>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* 상태 배지 */}
-      <div className={`rounded-xl px-4 py-3 text-sm font-medium text-center
-        ${trip.status === "draft"     ? "bg-gray-100 text-gray-600" :
-          trip.status === "submitted" ? "bg-amber-50 text-amber-700 border border-amber-200" :
-          trip.status === "approved"  ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
-          "bg-red-50 text-red-700 border border-red-200"}`}>
-        {{
-          draft:     "✏️  작성 중 — 월말에 제출해주세요",
-          submitted: "⏳ 승인 대기 중",
-          approved:  "✅ 승인 완료",
-          rejected:  "❌ 반려됨 — 수정 후 재제출하세요",
-        }[trip.status]}
+      <div className="rounded-xl px-4 py-3 text-sm font-medium text-center bg-gray-100 text-gray-600">
+        {statusMap[trip.status] ?? trip.status}
       </div>
 
-      {/* 액션 버튼 */}
       <div className="grid grid-cols-2 gap-3">
         <Link href="/"
-          className="rounded-xl border border-border bg-background py-3.5 text-center text-sm font-medium active:bg-muted transition-colors">
+          className="rounded-xl border border-border bg-background py-3.5 text-center text-sm font-medium">
           홈으로
         </Link>
         <Link href="/my-trips"
-          className="rounded-xl bg-primary text-primary-foreground py-3.5 text-center text-sm font-medium active:opacity-90 transition-opacity">
+          className="rounded-xl bg-primary text-primary-foreground py-3.5 text-center text-sm font-medium">
           내 기록 보기
         </Link>
       </div>

@@ -19,17 +19,10 @@ export default async function MyTripsPage({ searchParams }: Props) {
   if (!user) redirect("/login");
 
   const { data: driver } = await supabase
-    .from("drivers")
-    .select("id, name")
-    .eq("user_id", user.id)
-    .single();
+    .from("drivers").select("id, name").eq("user_id", user.id).single();
 
   if (!driver) {
-    return (
-      <div className="p-6 text-center text-muted-foreground">
-        운전자 등록이 필요합니다.
-      </div>
-    );
+    return <div className="p-6 text-center text-muted-foreground">운전자 등록이 필요합니다.</div>;
   }
 
   const now = new Date();
@@ -48,7 +41,7 @@ export default async function MyTripsPage({ searchParams }: Props) {
     .lt("departure_time", monthEnd)
     .order("departure_time", { ascending: false });
 
-  if (searchParams.status) query = query.eq("status", searchParams.status);
+  if (searchParams.status) query = query.eq("status", searchParams.status) as typeof query;
 
   const { data: trips } = await query;
 
@@ -57,7 +50,6 @@ export default async function MyTripsPage({ searchParams }: Props) {
 
   const monthLabel = selectedMonth.toLocaleDateString("ko-KR", { year: "numeric", month: "long" });
 
-  // 이전/다음 달 계산
   const prevMonth = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() - 1, 1);
   const nextMonth = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1);
   const prevParam = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, "0")}`;
@@ -66,39 +58,28 @@ export default async function MyTripsPage({ searchParams }: Props) {
 
   return (
     <div className="pb-6">
-      {/* 월 선택 헤더 */}
       <div className="flex items-center justify-between px-4 py-3 bg-background border-b border-border">
         <Link href={`/my-trips?month=${prevParam}`} className="p-2 rounded-lg hover:bg-muted">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <polyline points="15 18 9 12 15 6"/>
-          </svg>
+          &lt;
         </Link>
         <span className="font-semibold text-sm">{monthLabel}</span>
         <Link href={`/my-trips?month=${nextParam}`}
-          className={`p-2 rounded-lg ${isCurrentMonth ? "opacity-30 pointer-events-none" : "hover:bg-muted"}`}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <polyline points="9 18 15 12 9 6"/>
-          </svg>
+          className={isCurrentMonth ? "opacity-30 pointer-events-none p-2" : "p-2 rounded-lg hover:bg-muted"}>
+          &gt;
         </Link>
       </div>
 
-      {/* 월 집계 */}
       <div className="grid grid-cols-2 gap-3 p-4">
         <div className="rounded-xl bg-muted p-3 text-center">
           <p className="text-xs text-muted-foreground">총 운행거리</p>
-          <p className="text-xl font-bold mt-0.5">{totalDistance.toLocaleString("ko-KR")}
-            <span className="text-xs font-normal ml-1">km</span>
-          </p>
+          <p className="text-xl font-bold mt-0.5">{totalDistance.toLocaleString("ko-KR")}<span className="text-xs font-normal ml-1">km</span></p>
         </div>
         <div className="rounded-xl bg-muted p-3 text-center">
           <p className="text-xs text-muted-foreground">총 통행료</p>
-          <p className="text-xl font-bold mt-0.5">{totalToll.toLocaleString("ko-KR")}
-            <span className="text-xs font-normal ml-1">원</span>
-          </p>
+          <p className="text-xl font-bold mt-0.5">{totalToll.toLocaleString("ko-KR")}<span className="text-xs font-normal ml-1">원</span></p>
         </div>
       </div>
 
-      {/* 상태 필터 탭 */}
       <div className="flex gap-2 px-4 pb-3 overflow-x-auto">
         {[
           { key: "",          label: "전체" },
@@ -107,7 +88,7 @@ export default async function MyTripsPage({ searchParams }: Props) {
           { key: "approved",  label: "승인완료" },
         ].map(({ key, label }) => (
           <Link key={key}
-            href={`/my-trips${key ? `?status=${key}` : ""}${searchParams.month ? `${key ? "&" : "?"}month=${searchParams.month}` : ""}`}
+            href={`/my-trips${key ? `?status=${key}` : ""}`}
             className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition-colors
               ${searchParams.status === key || (!searchParams.status && !key)
                 ? "bg-primary text-primary-foreground"
@@ -117,7 +98,6 @@ export default async function MyTripsPage({ searchParams }: Props) {
         ))}
       </div>
 
-      {/* 기록 목록 */}
       {!trips?.length ? (
         <div className="px-4 py-12 text-center text-muted-foreground text-sm">
           이번 달 운행 기록이 없습니다
@@ -128,39 +108,26 @@ export default async function MyTripsPage({ searchParams }: Props) {
             const dep = new Date(trip.departure_time);
             const statusInfo = STATUS_LABEL[trip.status] ?? STATUS_LABEL.draft;
             const isOngoing = !trip.arrival_time;
-
             return (
               <Link key={trip.id}
                 href={isOngoing ? `/trip/${trip.id}/end` : `/trip/${trip.id}/complete`}
-                className="block rounded-2xl bg-background border border-border p-4 space-y-3 active:bg-muted/50 transition-colors">
-                {/* 상단: 날짜 + 상태 배지 */}
+                className="block rounded-2xl bg-background border border-border p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">
                     {dep.toLocaleDateString("ko-KR", { month: "short", day: "numeric", weekday: "short" })}
-                    {" · "}
-                    {dep.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}
                   </span>
                   <span className={`text-xs font-medium rounded-full px-2.5 py-1 ${statusInfo.className}`}>
-                    {isOngoing ? "🚗 운행중" : statusInfo.text}
+                    {isOngoing ? "운행중" : statusInfo.text}
                   </span>
                 </div>
-
-                {/* 출발 → 도착 */}
                 <div className="flex items-center gap-2 text-sm">
                   <span className="font-medium truncate flex-1">{trip.departure_location}</span>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-muted-foreground">
-                    <line x1="5" y1="12" x2="19" y2="12"/>
-                    <polyline points="12 5 19 12 12 19"/>
-                  </svg>
-                  <span className="font-medium truncate flex-1 text-right">
-                    {trip.arrival_location ?? "—"}
-                  </span>
+                  <span className="text-muted-foreground">→</span>
+                  <span className="font-medium truncate flex-1 text-right">{trip.arrival_location ?? "—"}</span>
                 </div>
-
-                {/* 하단: 통계 */}
                 <div className="flex gap-4 text-xs text-muted-foreground">
-                  <span>📍 {trip.distance_km !== null ? `${trip.distance_km.toLocaleString("ko-KR")}km` : "진행중"}</span>
-                  {trip.toll_fee > 0 && <span>🛣 {trip.toll_fee.toLocaleString("ko-KR")}원</span>}
+                  <span>{trip.distance_km !== null ? `${trip.distance_km.toLocaleString("ko-KR")}km` : "진행중"}</span>
+                  {trip.toll_fee > 0 && <span>{trip.toll_fee.toLocaleString("ko-KR")}원</span>}
                   <span className="truncate">{trip.purpose}</span>
                 </div>
               </Link>
