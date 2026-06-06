@@ -9,16 +9,24 @@ interface Props   { vehicles: Vehicle[]; driver: Driver; }
 
 const PURPOSES = ["고객사 방문","영업 미팅","부품 납품","자재 수령","현장 점검","사내 출장","기타"];
 
+function toLocalDateTimeString(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export default function TripStartForm({ vehicles, driver }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [customPurpose, setCustomPurpose] = useState(false);
+
+  const now = new Date();
   const [form, setForm] = useState({
     vehicle_id: vehicles[0]?.id ?? "",
     departure_location: "",
     departure_km: "",
     purpose: PURPOSES[0],
+    departure_time: toLocalDateTimeString(now),
   });
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
@@ -44,6 +52,7 @@ export default function TripStartForm({ vehicles, driver }: Props) {
           departure_location: form.departure_location,
           departure_km: depKm,
           purpose: form.purpose,
+          departure_time: new Date(form.departure_time).toISOString(),
         }),
       });
       const data = await res.json();
@@ -55,6 +64,29 @@ export default function TripStartForm({ vehicles, driver }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+
+      {/* 날짜/시간 */}
+      <div className="space-y-2">
+        <label htmlFor="dep_time" className="text-sm font-semibold">
+          출발 일시 <span className="text-destructive">*</span>
+        </label>
+        <input
+          id="dep_time"
+          type="datetime-local"
+          value={form.departure_time}
+          onChange={e => set("departure_time", e.target.value)}
+          required
+          className="w-full rounded-xl border border-input bg-background px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-primary/50"
+        />
+        <p className="text-xs text-muted-foreground">
+          {form.departure_time && (() => {
+            const d = new Date(form.departure_time);
+            return d.toLocaleDateString("ko-KR", { year:"numeric", month:"long", day:"numeric", weekday:"long" });
+          })()}
+        </p>
+      </div>
+
+      {/* 차량 선택 */}
       <div className="space-y-2">
         <label className="text-sm font-semibold">차량 선택 <span className="text-destructive">*</span></label>
         <div className="grid gap-2">
@@ -66,12 +98,13 @@ export default function TripStartForm({ vehicles, driver }: Props) {
                 <p className="font-medium">{v.plate_number}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">{v.model}</p>
               </div>
-              {form.vehicle_id === v.id && <span className="text-primary">✓</span>}
+              {form.vehicle_id === v.id && <span className="text-primary font-bold">✓</span>}
             </button>
           ))}
         </div>
       </div>
 
+      {/* 출발지 */}
       <div className="space-y-2">
         <label htmlFor="dep_loc" className="text-sm font-semibold">출발지 <span className="text-destructive">*</span></label>
         <input id="dep_loc" type="text" inputMode="text" placeholder="삼우에레코 본사"
@@ -79,6 +112,7 @@ export default function TripStartForm({ vehicles, driver }: Props) {
           className="w-full rounded-xl border border-input bg-background px-4 py-3 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
       </div>
 
+      {/* 출발 km */}
       <div className="space-y-2">
         <label htmlFor="dep_km" className="text-sm font-semibold">출발 계기판 km <span className="text-destructive">*</span></label>
         <div className="relative">
@@ -89,6 +123,7 @@ export default function TripStartForm({ vehicles, driver }: Props) {
         </div>
       </div>
 
+      {/* 업무 목적 */}
       <div className="space-y-2">
         <label className="text-sm font-semibold">업무 목적 <span className="text-destructive">*</span></label>
         <div className="flex flex-wrap gap-2">
