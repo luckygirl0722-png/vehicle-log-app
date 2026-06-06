@@ -1,22 +1,37 @@
-import { type NextRequest } from "next/server";
-import { updateSession } from "@/lib/supabase/middleware";
+import { type NextRequest, NextResponse } from "next/server";
 
 /**
- * Next.js 미들웨어 — 모든 요청에서 세션을 갱신하고 라우트를 보호합니다
+ * 미들웨어 — Edge Runtime 호환 단순 쿠키 기반 인증 체크
+ * Supabase 클라이언트를 직접 사용하지 않아 Edge Runtime 충돌 없음
+ * 실제 인증 검증은 각 페이지/레이아웃의 createClient()가 담당
  */
-export async function middleware(request: NextRequest) {
-  return await updateSession(request);
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // 공개 경로 — 인증 불필요
+  const publicPaths = ["/login", "/auth/callback", "/_next", "/favicon", "/manifest", "/icons", "/sw.js"];
+  if (publicPaths.some(p => pathname.startsWith(p))) {
+    return NextResponse.next();
+  }
+
+  // Supabase 세션 쿠키 존재 여부 확인
+  const cookies = request.cookies.getAll();
+  const hasSession = cookies.some(c =>
+    c.name.startsWith("sb-") && c.name.endsWith("-auth-token")
+  );
+
+  // 미인증 → /login 리다이렉트
+  if (!hasSession) {
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    return NextResponse.redirect(loginUrl);
+  }
+
+  return NextResponse.next();
 }
 
 export const config = {
   matcher: [
-    /*
-     * 아래 경로를 제외한 모든 요청에 미들웨어 적용:
-     * - _next/static  (정적 파일)
-     * - _next/image   (이미지 최적화)
-     * - favicon.ico, manifest.json, sw.js (PWA)
-     * - public 폴더 이미지 파일
-     */
-    "/((?!_next/static|_next/image|favicon.ico|manifest.json|sw.js|icons/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|manifest.json|sw.js|icons/).*)",
   ],
 };
