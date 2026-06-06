@@ -1,8 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { formatKm, formatKRW } from "@/lib/utils";
-
 /**
  * 모바일 홈 — 운전자 오늘의 운행 현황 (실데이터 연결)
  */

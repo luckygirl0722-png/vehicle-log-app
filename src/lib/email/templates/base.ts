@@ -1,3 +1,6 @@
+/** 회사명 */
+export const COMPANY_NAME = "삼우에레코주식회사";
+
 /** 브랜드 컬러 */
 const NAVY  = "#1F4E79";
 const LGRAY = "#F9FAFB";
