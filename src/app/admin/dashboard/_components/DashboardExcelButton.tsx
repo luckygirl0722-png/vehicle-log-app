@@ -10,8 +10,8 @@ export default function DashboardExcelButton({ year, month, label }: Props) {
   async function handleDownload() {
     setMsg(null);
     startTransition(async () => {
-      // all_status=true: draft 포함 전체 상태 다운로드
-      const res = await fetch(`/api/reports/excel?year=${year}&month=${month}&all_status=true`);
+      // 화면 집계 테이블과 동일한 형식 (차량별 업무/출퇴근 집계)
+      const res = await fetch(`/api/reports/excel/vehicle-summary?year=${year}&month=${month}`);
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         setMsg(d.error ?? "다운로드 실패");
