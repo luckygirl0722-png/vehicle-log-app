@@ -23,9 +23,10 @@ export async function GET(request: NextRequest) {
   if (error) return error;
 
   const { searchParams } = new URL(request.url);
-  const yearStr  = searchParams.get("year");
-  const monthStr = searchParams.get("month");
+  const yearStr   = searchParams.get("year");
+  const monthStr  = searchParams.get("month");
   const vehicleId = searchParams.get("vehicle_id");
+  const allStatus = searchParams.get("all_status") === "true"; // 전체 상태 포함
 
   // 파라미터 검증
   if (!yearStr || !monthStr) return badReq("year와 month는 필수 파라미터입니다.");
@@ -54,7 +55,7 @@ export async function GET(request: NextRequest) {
     .gte("departure_time", from)
     .lt("departure_time", to)
     .not("arrival_time", "is", null)
-    .in("status", ["approved", "submitted"])
+    .in("status", allStatus ? ["draft", "submitted", "approved", "rejected"] : ["approved", "submitted"])
     .order("departure_time", { ascending: true });
 
   if (vehicleId) tripQuery = tripQuery.eq("vehicle_id", vehicleId);

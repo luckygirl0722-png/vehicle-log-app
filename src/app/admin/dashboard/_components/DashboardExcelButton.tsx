@@ -10,16 +10,18 @@ export default function DashboardExcelButton({ year, month, label }: Props) {
   async function handleDownload() {
     setMsg(null);
     startTransition(async () => {
-      const res = await fetch(`/api/reports/excel?year=${year}&month=${month}`);
+      // all_status=true: draft 포함 전체 상태 다운로드
+      const res = await fetch(`/api/reports/excel?year=${year}&month=${month}&all_status=true`);
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         setMsg(d.error ?? "다운로드 실패");
+        setTimeout(() => setMsg(null), 4000);
         return;
       }
       const blob = await res.blob();
       const cd = res.headers.get("Content-Disposition") ?? "";
       const match = cd.match(/filename\*=UTF-8\'\'(.+)/i);
-      const fn = match ? decodeURIComponent(match[1]) : `차량운행일지_${year}년${String(month).padStart(2,"0")}월.xlsx`;
+      const fn = match ? decodeURIComponent(match[1]) : `차량운행집계_${year}년${String(month).padStart(2,"0")}월.xlsx`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.download = fn;
@@ -32,7 +34,11 @@ export default function DashboardExcelButton({ year, month, label }: Props) {
 
   return (
     <div className="flex items-center gap-2">
-      {msg && <span className="text-xs text-emerald-600">{msg}</span>}
+      {msg && (
+        <span className={`text-xs ${msg.includes("실패") ? "text-destructive" : "text-emerald-600"}`}>
+          {msg}
+        </span>
+      )}
       <button onClick={handleDownload} disabled={isPending}
         className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50 transition-colors">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
