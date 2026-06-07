@@ -1,14 +1,14 @@
 "use client";
-
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 interface Vehicle { id: string; plate_number: string; model: string; }
 interface Driver  { id: string; name: string; }
 interface Props   {
-  vehicles:  Vehicle[];
-  driver:    Driver;
-  lastKmMap: Record<string, number>; // vehicleId -> 마지막 도착km
+  vehicles:       Vehicle[];
+  driver:         Driver;
+  lastKmMap:      Record<string, number>;
+  quickLocations: string[];
 }
 
 const BUSINESS_PURPOSES = ["고객사 방문","영업 미팅","부품 납품","자재 수령","현장 점검","사내 출장","기타"];
@@ -19,10 +19,10 @@ function toLocalDateTimeString(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export default function TripStartForm({ vehicles, driver, lastKmMap }: Props) {
+export default function TripStartForm({ vehicles, driver, lastKmMap, quickLocations }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError]      = useState<string | null>(null);
   const [tripType, setTripType] = useState<"업무" | "출퇴근">("업무");
   const [customPurpose, setCustomPurpose] = useState(false);
   const now = new Date();
@@ -36,32 +36,24 @@ export default function TripStartForm({ vehicles, driver, lastKmMap }: Props) {
   });
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  // 차량 변경 시 마지막 km 자동 입력
   function handleVehicleSelect(vehicleId: string) {
     const lastKm = lastKmMap[vehicleId];
-    setForm(f => ({
-      ...f,
-      vehicle_id:   vehicleId,
-      departure_km: lastKm !== undefined ? String(lastKm) : "",
-    }));
+    setForm(f => ({ ...f, vehicle_id: vehicleId, departure_km: lastKm !== undefined ? String(lastKm) : "" }));
   }
 
-  // 운행 유형 변경 시 목적 초기화
   function handleTypeChange(type: "업무" | "출퇴근") {
     setTripType(type);
     setCustomPurpose(false);
-    setForm(f => ({
-      ...f,
-      purpose: type === "업무" ? BUSINESS_PURPOSES[0] : COMMUTE_PURPOSES[0],
-    }));
+    setForm(f => ({ ...f, purpose: type === "업무" ? BUSINESS_PURPOSES[0] : COMMUTE_PURPOSES[0] }));
   }
-
-  const purposes = tripType === "업무" ? BUSINESS_PURPOSES : COMMUTE_PURPOSES;
 
   function handlePurposeSelect(p: string) {
     if (p === "기타") { setCustomPurpose(true); set("purpose", ""); }
     else { setCustomPurpose(false); set("purpose", p); }
   }
+
+  const purposes = tripType === "업무" ? BUSINESS_PURPOSES : COMMUTE_PURPOSES;
+  const lastKm   = lastKmMap[form.vehicle_id];
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -69,19 +61,18 @@ export default function TripStartForm({ vehicles, driver, lastKmMap }: Props) {
     const depKm = parseInt(form.departure_km, 10);
     if (isNaN(depKm) || depKm < 0) { setError("출발 km를 입력하세요."); return; }
     if (!form.purpose.trim()) { setError("업무 목적을 입력하세요."); return; }
-
     startTransition(async () => {
       const res = await fetch("/api/trips", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          vehicle_id:         form.vehicle_id,
-          driver_id:          driver.id,
+          vehicle_id: form.vehicle_id,
+          driver_id:  driver.id,
           departure_location: form.departure_location,
-          departure_km:       depKm,
-          purpose:            tripType === "출퇴근" ? `[출퇴근] ${form.purpose}` : form.purpose,
-          departure_time:     new Date(form.departure_time).toISOString(),
-          trip_type:          tripType,
+          departure_km: depKm,
+          purpose: tripType === "출퇴근" ? `[출퇴근] ${form.purpose}` : form.purpose,
+          departure_time: new Date(form.departure_time).toISOString(),
+          trip_type: tripType,
         }),
       });
       const data = await res.json();
@@ -91,12 +82,10 @@ export default function TripStartForm({ vehicles, driver, lastKmMap }: Props) {
     });
   }
 
-  const lastKm = lastKmMap[form.vehicle_id];
-
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
 
-      {/* 운행 유형 토글 */}
+      {/* 운행 유형 */}
       <div className="space-y-2">
         <label className="text-sm font-semibold">운행 유형 <span className="text-destructive">*</span></label>
         <div className="grid grid-cols-2 gap-2">
@@ -104,26 +93,17 @@ export default function TripStartForm({ vehicles, driver, lastKmMap }: Props) {
             <button key={type} type="button" onClick={() => handleTypeChange(type)}
               className={`rounded-xl py-3 text-sm font-semibold border-2 transition-colors
                 ${tripType === type
-                  ? type === "업무"
-                    ? "bg-primary text-primary-foreground border-primary"
-                    : "bg-emerald-600 text-white border-emerald-600"
+                  ? type === "업무" ? "bg-primary text-primary-foreground border-primary" : "bg-emerald-600 text-white border-emerald-600"
                   : "bg-background border-border text-foreground"}`}>
               {type === "업무" ? "🚗 업무" : "🏠 출퇴근"}
             </button>
           ))}
         </div>
-        {tripType === "출퇴근" && (
-          <p className="text-xs text-emerald-600 bg-emerald-50 rounded-lg px-3 py-2">
-            출퇴근 운행 — km와 통행료가 별도 집계됩니다
-          </p>
-        )}
       </div>
 
       {/* 날짜/시간 */}
       <div className="space-y-2">
-        <label htmlFor="dep_time" className="text-sm font-semibold">
-          출발 일시 <span className="text-destructive">*</span>
-        </label>
+        <label htmlFor="dep_time" className="text-sm font-semibold">출발 일시 <span className="text-destructive">*</span></label>
         <input id="dep_time" type="datetime-local" value={form.departure_time}
           onChange={e => set("departure_time", e.target.value)} required
           className="w-full rounded-xl border border-input bg-background px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-primary/50" />
@@ -149,47 +129,55 @@ export default function TripStartForm({ vehicles, driver, lastKmMap }: Props) {
               </div>
               <div className="text-right">
                 {lastKmMap[v.id] !== undefined && (
-                  <p className="text-xs text-muted-foreground">마지막 {lastKmMap[v.id].toLocaleString("ko-KR")} km</p>
+                  <p className="text-xs text-muted-foreground">이전 {lastKmMap[v.id].toLocaleString("ko-KR")} km</p>
                 )}
-                {form.vehicle_id === v.id && <span className="text-primary font-bold text-sm">✓</span>}
+                {form.vehicle_id === v.id && <span className="text-primary font-bold">✓</span>}
               </div>
             </button>
           ))}
         </div>
       </div>
 
-      {/* 출발지 */}
+      {/* ★ 출발지 (빠른 선택) */}
       <div className="space-y-2">
-        <label htmlFor="dep_loc" className="text-sm font-semibold">
-          출발지 <span className="text-destructive">*</span>
-        </label>
+        <label htmlFor="dep_loc" className="text-sm font-semibold">출발지 <span className="text-destructive">*</span></label>
         <input id="dep_loc" type="text" inputMode="text"
           placeholder={tripType === "출퇴근" ? "자택" : "삼우에레코 본사"}
           value={form.departure_location} onChange={e => set("departure_location", e.target.value)} required
           className="w-full rounded-xl border border-input bg-background px-4 py-3 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
+        {/* 빠른 선택 칩 */}
+        {quickLocations.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {quickLocations.map(loc => (
+              <button key={loc} type="button"
+                onClick={() => set("departure_location", loc)}
+                className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors
+                  ${form.departure_location === loc
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background border-border text-muted-foreground hover:text-foreground"}`}>
+                {loc}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 출발 km */}
       <div className="space-y-2">
-        <label htmlFor="dep_km" className="text-sm font-semibold">
-          출발 계기판 km <span className="text-destructive">*</span>
-        </label>
+        <label htmlFor="dep_km" className="text-sm font-semibold">출발 계기판 km <span className="text-destructive">*</span></label>
         <div className="relative">
           <input id="dep_km" type="number" inputMode="numeric"
-            placeholder={lastKm !== undefined ? `마지막 ${lastKm.toLocaleString("ko-KR")}` : "45200"}
+            placeholder={lastKm !== undefined ? `이전 ${lastKm.toLocaleString("ko-KR")}` : "45200"}
             value={form.departure_km} onChange={e => set("departure_km", e.target.value)} required min="0"
             className="w-full rounded-xl border border-input bg-background px-4 py-3 pr-14 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
           <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">km</span>
         </div>
         {lastKm !== undefined && (
-          <p className="text-xs text-primary">
-            이전 도착: {lastKm.toLocaleString("ko-KR")} km
-            {form.departure_km === String(lastKm) && " ✓ 자동 입력됨"}
-          </p>
+          <p className="text-xs text-primary">이전 도착: {lastKm.toLocaleString("ko-KR")} km {form.departure_km === String(lastKm) ? "✓ 자동 입력됨" : ""}</p>
         )}
       </div>
 
-      {/* 목적 */}
+      {/* 업무 목적 */}
       <div className="space-y-2">
         <label className="text-sm font-semibold">
           {tripType === "업무" ? "업무 목적" : "출퇴근 구분"} <span className="text-destructive">*</span>
@@ -199,9 +187,7 @@ export default function TripStartForm({ vehicles, driver, lastKmMap }: Props) {
             <button key={p} type="button" onClick={() => handlePurposeSelect(p)}
               className={`rounded-full px-4 py-2 text-sm font-medium border transition-colors
                 ${(!customPurpose && form.purpose === p) || (p === "기타" && customPurpose)
-                  ? tripType === "출퇴근"
-                    ? "bg-emerald-600 text-white border-emerald-600"
-                    : "bg-primary text-primary-foreground border-primary"
+                  ? tripType === "출퇴근" ? "bg-emerald-600 text-white border-emerald-600" : "bg-primary text-primary-foreground border-primary"
                   : "bg-background text-foreground border-border"}`}>
               {p}
             </button>

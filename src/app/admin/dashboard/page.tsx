@@ -152,7 +152,7 @@ export default async function AdminDashboardPage() {
             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" />출퇴근(개인)</span>
           </div>
         </div>
-        <VehicleMonthlyStats rows={vehicleStatsRows} monthLabel={monthLabel} />
+        <VehicleMonthlyStats rows={vehicleStatsRows} monthLabel={monthLabel} year={now.getFullYear()} month={now.getMonth()+1} />
       </div>
 
       {/* 최근 운행 */}

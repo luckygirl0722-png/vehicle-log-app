@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import BulkSubmitSection from "./_components/BulkSubmitSection";
 
 export const metadata = { title: "내 기록 - 차량 운행일지" };
 
@@ -38,7 +39,6 @@ export default async function MyTripsPage({ searchParams }: Props) {
   const nextParam  = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}`;
   const isCurrentMonth = selectedMonth.getMonth() === now.getMonth() && selectedMonth.getFullYear() === now.getFullYear();
 
-  // 전체 기록 조회 (trip_type 포함)
   let query = supabase
     .from("trip_logs")
     .select("id, departure_time, departure_location, arrival_location, arrival_time, distance_km, toll_fee, status, purpose, trip_type")
@@ -52,27 +52,29 @@ export default async function MyTripsPage({ searchParams }: Props) {
 
   const { data: trips } = await query;
 
-  // 업무 / 출퇴근 별도 집계
   const { data: allTrips } = await supabase
     .from("trip_logs")
-    .select("distance_km, toll_fee, trip_type")
+    .select("distance_km, toll_fee, trip_type, status, arrival_time, id")
     .eq("driver_id", driver.id)
     .gte("departure_time", monthStart)
     .lt("departure_time", monthEnd);
 
   const bizTrips     = allTrips?.filter(t => (t.trip_type ?? "업무") === "업무") ?? [];
   const commuteTrips = allTrips?.filter(t => t.trip_type === "출퇴근") ?? [];
+  const bizDistance  = bizTrips.reduce((s, t) => s + (t.distance_km ?? 0), 0);
+  const bizToll      = bizTrips.reduce((s, t) => s + (t.toll_fee ?? 0), 0);
+  const comDistance  = commuteTrips.reduce((s, t) => s + (t.distance_km ?? 0), 0);
+  const comToll      = commuteTrips.reduce((s, t) => s + (t.toll_fee ?? 0), 0);
 
-  const bizDistance     = bizTrips.reduce((s, t) => s + (t.distance_km ?? 0), 0);
-  const bizToll         = bizTrips.reduce((s, t) => s + (t.toll_fee ?? 0), 0);
-  const commuteDistance = commuteTrips.reduce((s, t) => s + (t.distance_km ?? 0), 0);
-  const commuteToll     = commuteTrips.reduce((s, t) => s + (t.toll_fee ?? 0), 0);
+  // 완료된 draft 기록 ID (제출 버튼용)
+  const submitableDraftIds = (allTrips ?? [])
+    .filter(t => t.status === "draft" && t.arrival_time !== null)
+    .map(t => t.id);
 
   const activeType = searchParams.type ?? "";
 
   return (
     <div className="pb-6">
-      {/* 월 선택 헤더 */}
       <div className="flex items-center justify-between px-4 py-3 bg-background border-b border-border">
         <Link href={`/my-trips?month=${prevParam}`} className="p-2 rounded-lg hover:bg-muted">&lt;</Link>
         <span className="font-semibold text-sm">{monthLabel}</span>
@@ -83,7 +85,7 @@ export default async function MyTripsPage({ searchParams }: Props) {
       {/* 업무 집계 */}
       <div className="mx-4 mt-4 rounded-xl border border-border bg-background overflow-hidden">
         <div className="px-4 py-2 bg-muted/50 flex items-center gap-2">
-          <span className="text-xs font-semibold text-foreground">업무 운행</span>
+          <span className="text-xs font-semibold">업무 운행</span>
           <span className="text-xs text-muted-foreground">{bizTrips.length}건</span>
         </div>
         <div className="grid grid-cols-2 divide-x divide-border">
@@ -108,44 +110,34 @@ export default async function MyTripsPage({ searchParams }: Props) {
         <div className="grid grid-cols-2 divide-x divide-emerald-200">
           <div className="p-3 text-center">
             <p className="text-xs text-emerald-600">운행거리</p>
-            <p className="text-lg font-bold text-emerald-700">{commuteDistance.toLocaleString("ko-KR")}<span className="text-xs font-normal ml-0.5">km</span></p>
+            <p className="text-lg font-bold text-emerald-700">{comDistance.toLocaleString("ko-KR")}<span className="text-xs font-normal ml-0.5">km</span></p>
           </div>
           <div className="p-3 text-center">
             <p className="text-xs text-emerald-600">통행료(개인)</p>
-            <p className="text-lg font-bold text-emerald-700">{commuteToll.toLocaleString("ko-KR")}<span className="text-xs font-normal ml-0.5">원</span></p>
+            <p className="text-lg font-bold text-emerald-700">{comToll.toLocaleString("ko-KR")}<span className="text-xs font-normal ml-0.5">원</span></p>
           </div>
         </div>
       </div>
 
+      {/* ★ 월 전체 제출 버튼 */}
+      <BulkSubmitSection draftIds={submitableDraftIds} />
+
       {/* 필터 탭 */}
       <div className="flex gap-2 px-4 pt-3 pb-2 overflow-x-auto">
-        {[
-          { key: "",          label: "전체" },
-          { key: "업무",      label: "업무" },
-          { key: "출퇴근",    label: "출퇴근" },
-        ].map(({ key, label }) => (
+        {[{ key: "", label: "전체" }, { key: "업무", label: "업무" }, { key: "출퇴근", label: "출퇴근" }].map(({ key, label }) => (
           <Link key={key}
             href={`/my-trips${searchParams.month ? `?month=${searchParams.month}&` : "?"}${key ? `type=${key}` : ""}`}
             className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition-colors
-              ${activeType === key
-                ? key === "출퇴근" ? "bg-emerald-600 text-white" : "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground"}`}>
+              ${activeType === key ? (key === "출퇴근" ? "bg-emerald-600 text-white" : "bg-primary text-primary-foreground") : "bg-muted text-muted-foreground"}`}>
             {label}
           </Link>
         ))}
         <span className="text-muted-foreground self-center mx-1">|</span>
-        {[
-          { key: "",          label: "전체상태" },
-          { key: "draft",     label: "작성중" },
-          { key: "submitted", label: "승인대기" },
-          { key: "approved",  label: "승인완료" },
-        ].map(({ key, label }) => (
+        {[{ key: "", label: "전체상태" }, { key: "draft", label: "작성중" }, { key: "submitted", label: "승인대기" }, { key: "approved", label: "승인완료" }].map(({ key, label }) => (
           <Link key={`s-${key}`}
             href={`/my-trips${searchParams.month ? `?month=${searchParams.month}&` : "?"}${key ? `status=${key}` : ""}`}
             className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors
-              ${(searchParams.status ?? "") === key
-                ? "bg-secondary text-secondary-foreground"
-                : "bg-muted text-muted-foreground"}`}>
+              ${(searchParams.status ?? "") === key ? "bg-secondary text-secondary-foreground" : "bg-muted text-muted-foreground"}`}>
             {label}
           </Link>
         ))}
@@ -153,9 +145,7 @@ export default async function MyTripsPage({ searchParams }: Props) {
 
       {/* 기록 목록 */}
       {!trips?.length ? (
-        <div className="px-4 py-12 text-center text-muted-foreground text-sm">
-          이번 달 운행 기록이 없습니다
-        </div>
+        <div className="px-4 py-12 text-center text-muted-foreground text-sm">이번 달 운행 기록이 없습니다</div>
       ) : (
         <div className="px-4 space-y-3">
           {trips.map(trip => {

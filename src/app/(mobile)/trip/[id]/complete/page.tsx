@@ -1,9 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
+import BackButton from "@/components/ui/BackButton";
 
-export const metadata = { title: "운행 완료 — 차량 운행일지" };
-
+export const metadata = { title: "운행 완료 - 차량 운행일지" };
 type Props = { params: { id: string } };
 
 export default async function TripCompletePage({ params }: Props) {
@@ -14,8 +14,7 @@ export default async function TripCompletePage({ params }: Props) {
   const { data: trip } = await supabase
     .from("trip_logs")
     .select("*, vehicles(plate_number, model), drivers(name)")
-    .eq("id", params.id)
-    .single();
+    .eq("id", params.id).single();
 
   if (!trip) notFound();
   if (!trip.arrival_time) redirect(`/trip/${params.id}/end`);
@@ -23,14 +22,11 @@ export default async function TripCompletePage({ params }: Props) {
   const depTime = new Date(trip.departure_time);
   const arrTime = new Date(trip.arrival_time as string);
   const durationMin = Math.round((arrTime.getTime() - depTime.getTime()) / 60000);
-  const hours   = Math.floor(durationMin / 60);
+  const hours = Math.floor(durationMin / 60);
   const minutes = durationMin % 60;
   const durationLabel = hours > 0 ? `${hours}시간 ${minutes}분` : `${minutes}분`;
-
-  const timeFormat = (d: Date) =>
-    d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
-  const dateFormat = (d: Date) =>
-    d.toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
+  const timeFormat = (d: Date) => d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+  const dateFormat = (d: Date) => d.toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
 
   const statusMap: Record<string, string> = {
     draft:     "작성 중 — 월말에 제출해주세요",
@@ -38,6 +34,8 @@ export default async function TripCompletePage({ params }: Props) {
     approved:  "승인 완료",
     rejected:  "반려됨 — 수정 후 재제출하세요",
   };
+
+  const canEdit = trip.status === "draft" || trip.status === "rejected";
 
   return (
     <div className="p-4 space-y-5">
@@ -65,39 +63,54 @@ export default async function TripCompletePage({ params }: Props) {
             </div>
           ))}
         </div>
-
         <div className="p-4 space-y-3 text-sm">
           {([
+            ["차량",   `${(trip.vehicles as any)?.plate_number ?? "—"} · ${(trip.vehicles as any)?.model ?? ""}`],
+            ["운전자", (trip.drivers as any)?.name ?? "—"],
             ["출발지", trip.departure_location],
             ["도착지", trip.arrival_location ?? "—"],
-            ["출발 km", `${trip.departure_km.toLocaleString("ko-KR")} km`],
-            ["도착 km", `${(trip.arrival_km ?? 0).toLocaleString("ko-KR")} km`],
-            ["출발", timeFormat(depTime)],
-            ["도착", timeFormat(arrTime)],
-            ["목적", trip.purpose],
+            ["출발km", `${trip.departure_km.toLocaleString("ko-KR")} km`],
+            ["도착km", `${(trip.arrival_km ?? 0).toLocaleString("ko-KR")} km`],
+            ["출발",   timeFormat(depTime)],
+            ["도착",   timeFormat(arrTime)],
+            ["목적",   trip.purpose],
           ] as [string, string][]).map(([label, value]) => (
             <div key={label} className="flex justify-between items-start gap-4">
-              <span className="text-muted-foreground shrink-0 w-16">{label}</span>
+              <span className="text-muted-foreground shrink-0 w-14">{label}</span>
               <span className="font-medium text-right">{value}</span>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="rounded-xl px-4 py-3 text-sm font-medium text-center bg-gray-100 text-gray-600">
+      <div className={`rounded-xl px-4 py-3 text-sm font-medium text-center
+        ${trip.status === "approved" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
+          trip.status === "rejected" ? "bg-red-50 text-red-700 border border-red-200" :
+          "bg-gray-100 text-gray-600"}`}>
         {statusMap[trip.status] ?? trip.status}
       </div>
 
+      {/* 버튼 영역 */}
       <div className="grid grid-cols-2 gap-3">
-        <Link href="/"
-          className="rounded-xl border border-border bg-background py-3.5 text-center text-sm font-medium">
-          홈으로
-        </Link>
         <Link href="/my-trips"
-          className="rounded-xl bg-primary text-primary-foreground py-3.5 text-center text-sm font-medium">
+          className="rounded-xl border border-border bg-background py-3.5 text-center text-sm font-medium">
           내 기록 보기
         </Link>
+        {canEdit ? (
+          <Link href={`/trip/${params.id}/end`}
+            className="rounded-xl bg-amber-500 text-white py-3.5 text-center text-sm font-semibold">
+            ✏️ 도착 정보 수정
+          </Link>
+        ) : (
+          <Link href="/"
+            className="rounded-xl bg-primary text-primary-foreground py-3.5 text-center text-sm font-medium">
+            홈으로
+          </Link>
+        )}
       </div>
+
+      {/* 뒤로가기 */}
+      <BackButton />
     </div>
   );
 }

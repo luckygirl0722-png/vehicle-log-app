@@ -8,186 +8,204 @@
 ## 프로젝트 개요
 
 **앱명**: 실시간 차량일지 작성 앱
+**회사**: 삼우에레코주식회사 (경영지원그룹)
 **목적**: 영업용 차량 운행 시 출발·도착 정보(운행거리, 목적지, 운전자, 통행료)를 실시간으로 기록하고, 세무·회계용 차량운행일지를 자동 생성한다.
 **사용자**: 운전자(모바일) + 관리자(웹)
+**배포 URL**: https://vehicle-log-app-two.vercel.app
+**관리자 계정**: claude_2@samwooeleco.com
 
 ---
 
 ## GStack (기술 스택)
 
 ```
-Frontend  : Next.js 14 (App Router) + TypeScript
-UI        : shadcn/ui + Tailwind CSS (브랜드: 곤색 #1f4e79 / Black / Gray / White)
-폰트      : Noto Sans KR (Bold/Medium/Regular)
+Frontend  : Next.js 14.2.35 (App Router) + TypeScript
+UI        : shadcn/ui (수동) + Tailwind CSS
+브랜드    : 곤색 #1f4e79 / Black / Gray / White
+폰트      : Noto Sans KR
 상태관리  : Zustand
 폼        : React Hook Form + Zod
-차트      : Recharts
-DB        : Supabase (PostgreSQL + Auth + Realtime + Storage)
-ORM       : Supabase JS Client (@supabase/supabase-js, @supabase/ssr)
+차트      : Recharts (BarChart, PieChart)
+DB        : Supabase (PostgreSQL + Auth + Realtime)
+ORM       : @supabase/supabase-js + @supabase/ssr
 인증      : Supabase Auth (이메일 + RLS)
 Excel출력 : SheetJS (xlsx)
 PDF출력   : @react-pdf/renderer
-알림      : Resend (이메일)
-PWA       : next-pwa
-배포      : Vercel + Supabase Cloud
+이메일    : Resend (운전자 초대 + 승인 알림)
+오프라인  : IndexedDB (native)
+배포      : Vercel (자동 배포, GitHub main 브랜치)
+DB 호스팅 : Supabase Cloud (qusiqhybzzuwhofryoql)
 ```
 
 ### 핵심 디렉터리 구조
+
 ```
 vehicle-log-app/
 ├── src/
 │   ├── app/
-│   │   ├── (auth)/login/        # 로그인 (TASK_03)
-│   │   ├── (mobile)/            # 운전자 모바일 UI (TASK_07~)
-│   │   ├── admin/               # 관리자 웹 UI (TASK_05~)
-│   │   └── api/                 # Route Handlers (TASK_04~)
+│   │   ├── (auth)/login/              # 로그인 (이메일기억 + 비번보기)
+│   │   ├── (mobile)/                  # 운전자 모바일 UI
+│   │   │   ├── page.tsx               # 홈 (업무/출퇴근 분리 집계)
+│   │   │   ├── trip/start/            # 출발 등록 (유형선택+마지막km자동)
+│   │   │   ├── trip/[id]/end/         # 도착 등록
+│   │   │   ├── trip/[id]/complete/    # 운행 완료 요약
+│   │   │   ├── my-trips/              # 내 기록 (업무/출퇴근 별도 집계)
+│   │   │   └── vehicle-trips/         # 차량별 기록
+│   │   ├── admin/                     # 관리자 웹 UI
+│   │   │   ├── dashboard/             # KPI + 차트 + 차량별월별집계
+│   │   │   ├── trips/                 # 운행 현황
+│   │   │   ├── vehicles/              # 차량 관리
+│   │   │   ├── drivers/               # 운전자 관리 + 초대 이메일
+│   │   │   ├── approvals/             # 승인 관리
+│   │   │   └── reports/               # Excel + PDF 보고서
+│   │   └── api/
+│   │       ├── trips/                 # 운행 기록 CRUD (trip_type 포함)
+│   │       ├── vehicles/              # 차량 CRUD
+│   │       ├── drivers/               # 운전자 CRUD
+│   │       ├── reports/excel/         # Excel 생성
+│   │       ├── reports/pdf/           # PDF 생성
+│   │       └── admin/invite-driver/   # 운전자 초대
 │   ├── lib/
-│   │   ├── supabase/
-│   │   │   ├── client.ts        # 브라우저용 Supabase 클라이언트
-│   │   │   └── server.ts        # 서버용 Supabase 클라이언트
-│   │   └── utils.ts             # cn(), formatKRW(), formatKm()
-│   └── types/
-│       └── database.ts          # 전체 DB 스키마 TypeScript 타입
+│   │   ├── supabase/                  # client.ts + server.ts
+│   │   ├── api/auth-guard.ts          # 권한 가드
+│   │   ├── validations/               # Zod (vehicle, driver, trip + trip_type)
+│   │   ├── email/                     # Resend 이메일
+│   │   ├── offline/                   # IndexedDB + 동기화
+│   │   ├── excel-generator.ts
+│   │   └── pdf-generator.tsx
+│   └── components/
+│       ├── ui/
+│       ├── auth/                      # LoginForm (이메일기억+눈아이콘) + LogoutButton
+│       └── offline/                   # OfflineBanner, InstallPrompt
 ├── supabase/
-│   └── migrations/              # SQL 마이그레이션 파일 (TASK_02~)
-├── tests/
-│   └── task01.test.mjs          # TASK_01 검증 테스트 (87 passed)
-├── public/
-│   └── manifest.json            # PWA 설정
-├── .env.example                 # 환경변수 템플릿
-└── SETUP.md                     # 초기 설치 가이드
+│   ├── migrations/001_init_schema.sql
+│   └── seed.sql
+└── docs/
+    ├── user-manual.md
+    ├── deployment-guide.md
+    └── e2e-checklist.md
 ```
+
+---
+
+## DB 스키마 요약
+
+```
+user_roles   : user_id, role (driver/admin)
+vehicles     : id, plate_number, model, purpose, is_active
+drivers      : id, user_id, employee_no, name, department, email, is_active
+trip_logs    : id, vehicle_id, driver_id,
+               departure_*, arrival_*,
+               distance_km (GENERATED STORED),
+               toll_fee, status, note,
+               trip_type VARCHAR(10) DEFAULT '업무'  ← NEW
+approvals    : id, trip_log_id, approver_id, action, comment
+```
+
+**상태 머신**: `draft → submitted → approved / rejected`
+
+**trip_type 값**: `'업무'` | `'출퇴근'`
 
 ---
 
 ## GSD 태스크 목록 및 진행 상황
 
-| 태스크 | 이름 | 상태 | 완료일 |
-|--------|------|------|--------|
-| **TASK_01** | 프로젝트 초기화 및 환경 설정 | ✅ 완료 | 2026-06-05 |
-| **TASK_02** | DB 스키마 설계 및 생성 | ✅ 완료 | 2026-06-05 |
-| **TASK_03** | 인증 시스템 (Supabase Auth + RBAC) | ✅ 완료 | 2026-06-05 |
-| **TASK_04** | 차량·운전자 관리 API | ✅ 완료 | 2026-06-05 |
-| **TASK_05** | 차량·운전자 관리 UI (관리자) | ✅ 완료 | 2026-06-05 |
-| **TASK_06** | 운행 기록 API | ✅ 완료 | 2026-06-05 |
-| **TASK_07** | 운행 기록 입력 UI (모바일) | ✅ 완료 | 2026-06-05 |
-| **TASK_08** | 운행 내역 조회 UI | ✅ 완료 | 2026-06-05 |
-| **TASK_09** | 관리자 대시보드 | ✅ 완료 | 2026-06-05 |
-| **TASK_10** | Excel 보고서 출력 | ✅ 완료 | 2026-06-05 |
-| **TASK_11** | PDF 보고서 출력 | ✅ 완료 | 2026-06-05 |
-| **TASK_12** | 승인 워크플로우 | ✅ 완료 | 2026-06-05 |
-| **TASK_13** | 이메일 알림 | ✅ 완료 | 2026-06-05 |
-| **TASK_14** | PWA 오프라인 지원 | ✅ 완료 | 2026-06-05 |
-| **TASK_15** | 최종 QA & 운영 배포 | ✅ 완료 | 2026-06-05 |
+### Phase 1 — 기반 구축
 
-**전체 진행률**: 15 / 15 완료 (100%) 🎉
+| TASK | 이름 | 상태 | 완료일 |
+|------|------|------|--------|
+| TASK_01 | 프로젝트 초기화 및 환경 설정 | ✅ 완료 | 2026-06-05 |
+| TASK_02 | DB 스키마 설계 및 생성 | ✅ 완료 | 2026-06-05 |
+| TASK_03 | 인증 시스템 (Supabase Auth + RBAC) | ✅ 완료 | 2026-06-05 |
+
+### Phase 2 — 핵심 기능
+
+| TASK | 이름 | 상태 | 완료일 |
+|------|------|------|--------|
+| TASK_04 | 차량·운전자 관리 API | ✅ 완료 | 2026-06-05 |
+| TASK_05 | 차량·운전자 관리 UI (관리자) | ✅ 완료 | 2026-06-05 |
+| TASK_06 | 운행 기록 API | ✅ 완료 | 2026-06-05 |
+| TASK_07 | 운행 기록 입력 UI (모바일) | ✅ 완료 | 2026-06-05 |
+| TASK_08 | 운행 내역 조회 UI | ✅ 완료 | 2026-06-05 |
+
+### Phase 3 — 부가 기능
+
+| TASK | 이름 | 상태 | 완료일 |
+|------|------|------|--------|
+| TASK_09 | 관리자 대시보드 | ✅ 완료 | 2026-06-05 |
+| TASK_10 | Excel 보고서 출력 | ✅ 완료 | 2026-06-05 |
+| TASK_11 | PDF 보고서 출력 | ✅ 완료 | 2026-06-05 |
+| TASK_12 | 승인 워크플로우 | ✅ 완료 | 2026-06-05 |
+| TASK_13 | 이메일 알림 | ✅ 완료 | 2026-06-05 |
+| TASK_14 | PWA 오프라인 지원 | ✅ 완료 | 2026-06-05 |
+| TASK_15 | 최종 QA & 운영 배포 | ✅ 완료 | 2026-06-05 |
+
+### Phase 4 — 배포 후 개선 (2026-06-06)
+
+| EXT | 이름 | 상태 | 완료일 |
+|-----|------|------|--------|
+| EXT_01 | Vercel 배포 (빌드 에러 해결) | ✅ 완료 | 2026-06-06 |
+| EXT_02 | Supabase DB 스키마 적용 | ✅ 완료 | 2026-06-06 |
+| EXT_03 | 관리자 계정 생성 및 권한 부여 | ✅ 완료 | 2026-06-06 |
+| EXT_04 | 날짜/시간 입력 필드 추가 | ✅ 완료 | 2026-06-06 |
+| EXT_05 | 차량별 기록 탭 (/vehicle-trips) | ✅ 완료 | 2026-06-06 |
+| EXT_06 | 운전자 초대 시스템 (자동 계정 연결) | ✅ 완료 | 2026-06-06 |
+| EXT_07 | drivers 테이블 email 컬럼 추가 | ✅ 완료 | 2026-06-06 |
+| EXT_08 | 업무/출퇴근 구분 (trip_type) | ✅ 완료 | 2026-06-06 |
+| EXT_09 | 차량별 마지막 도착km 자동 입력 | ✅ 완료 | 2026-06-06 |
+| EXT_10 | 업무/출퇴근 월별 별도 집계 (모바일) | ✅ 완료 | 2026-06-06 |
+| EXT_11 | 관리자 대시보드 차량별 월별 집계 | ✅ 완료 | 2026-06-06 |
+| EXT_12 | 로그인 이메일 기억 + 비밀번호 보기 | ✅ 완료 | 2026-06-06 |
+
+**전체 진행률**: 27 / 27 완료 (100%) 🎉
 
 ---
 
-## TASK_01 완료 내역
+## 주요 설계 결정사항
 
-### 생성된 파일
-| 파일 | 용도 |
-|------|------|
-| `package.json` | 의존성 정의 (Next.js 14, Supabase, Zustand, shadcn/ui 등 17종) |
-| `tailwind.config.ts` | 브랜드 컬러(곤색 #1f4e79), shadcn/ui CSS 변수 토큰 |
-| `next.config.mjs` | PWA(next-pwa) 설정 |
-| `src/app/globals.css` | CSS 변수, Noto Sans KR, 모바일 safe-area 유틸 |
-| `src/app/layout.tsx` | 루트 레이아웃 (lang=ko, PWA 메타데이터) |
-| `src/app/page.tsx` | 루트 → /login 리다이렉트 |
-| `src/app/(auth)/login/page.tsx` | 로그인 페이지 placeholder |
-| `src/lib/utils.ts` | `cn()`, `formatKRW()`, `formatKm()` |
-| `src/lib/supabase/client.ts` | 브라우저용 Supabase 클라이언트 |
-| `src/lib/supabase/server.ts` | 서버용 Supabase 클라이언트 (RSC/Route Handler) |
-| `src/types/database.ts` | Vehicle, Driver, TripLog, Approval 타입 |
-| `components.json` | shadcn/ui 설정 |
-| `.env.example` | 환경변수 템플릿 |
-| `.prettierrc` | Prettier + tailwindcss 플러그인 |
-| `.gitignore` | .env.local, PWA 빌드 파일 포함 |
-| `public/manifest.json` | PWA 앱 정보 |
-| `SETUP.md` | 설치 가이드 |
-| `tests/task01.test.mjs` | **검증 테스트 — 87/87 통과** |
+### 빌드 이슈 해결
+- `app/page.tsx`와 `app/(mobile)/page.tsx` URL 충돌 → `app/page.tsx` 삭제
+- `next-pwa` 제거 (Next.js 14 충돌)
+- 미들웨어에서 Supabase 제거 → 단순 쿠키 체크 (Edge Runtime 호환)
 
-### 테스트 결과
+### 운행 유형 구분 (trip_type)
+- `'업무'` : 영업/출장 등 회사 업무 → 승인 대상, Excel/PDF 증빙
+- `'출퇴근'` : 개인 출퇴근 → 별도 집계, 개인 통행료 관리
+
+### 운전자 계정 관리
 ```
-[A] 필수 파일 존재 검사    18/18  ✅
-[B] JSON 파일 유효성 검사   4/4   ✅
-[C] package.json 의존성    20/20  ✅
-[D] 환경변수 템플릿 검사    7/7   ✅
-[E] 유틸리티 함수 단위테스트 11/11 ✅
-[F] TypeScript 타입 구조   10/10  ✅
-[G] 설정 파일 핵심 토큰    17/17  ✅
-────────────────────────────
-합계                      87/87  ✅
+관리자 → 운전자 등록(이메일 포함) → "초대 발송"
+→ Supabase inviteUserByEmail → drivers.user_id 연결
+→ 운전자: 이메일 링크 → 비밀번호 설정 → 로그인
+→ loginAction: 이메일 매칭으로 user_id 자동 연결
 ```
 
----
-
-## TASK_02 완료 내역
-
-### 생성된 파일
-| 파일 | 용도 |
-|------|------|
-| `supabase/migrations/001_init_schema.sql` | 전체 스키마 (테이블 5개, 인덱스 7개, 트리거 2개, RLS 정책 13개) |
-| `supabase/seed.sql` | 차량 3대, 운전자 5명, 운행기록 6건 테스트 데이터 |
-| `tests/task02.test.mjs` | 검증 테스트 — **81/81 통과** |
-
-### 스키마 구조
-- `user_roles` — Auth 사용자 역할 (driver/admin), 신규 가입 시 자동 부여 트리거
-- `vehicles` — 차량 (plate_number UNIQUE, is_active)
-- `drivers` — 운전자 (employee_no UNIQUE, user_id → auth.users)
-- `trip_logs` — 운행일지 핵심. `distance_km`은 `GENERATED ALWAYS AS STORED` 자동계산
-- `approvals` — 승인/반려 이력
-
-### 핵심 설계 결정사항
-- `distance_km` = `arrival_km - departure_km` **DB 레벨 자동계산** (애플리케이션 오류 방지)
-- CHECK 제약: `arrival_km >= departure_km`, `arrival_time >= departure_time`
-- 신규 Auth 회원가입 → `user_roles`에 `driver` 자동 삽입 (트리거)
-- RLS: driver는 본인 `draft` 기록만 수정/삭제 가능, admin은 전체
+### 개발 규칙 (Claude 작업 지침)
+- **한 번에 하나의 기능만** 구현
+- **Python으로 파일 작성** — bash cp 시 한국어 경로 인코딩 잘림 방지
+- **git 커밋 메시지** — 한국어 콜론(:) 사용 금지 (PowerShell 오류)
+- **타입 우선** — `src/types/database.ts` 기반
+- **Supabase 클라이언트** — Server: `lib/supabase/server.ts`, Client: `lib/supabase/client.ts`
 
 ---
 
-## 다음 작업 — TASK_03
+## Supabase 프로젝트 정보
 
-### 목표
-Supabase Auth 기반 로그인 + 역할별 라우트 보호 미들웨어 구현
-
-### 핵심 작업
-1. Supabase Auth 이메일 로그인 UI (`/login`)
-2. Next.js `middleware.ts` — 미인증 시 `/login` 리다이렉트
-3. `user_roles` 연동 역할 분기 (driver → 모바일 홈, admin → 대시보드)
-4. 로그아웃 기능
-
-### 완료 기준
-- 미인증 접근 시 `/login` 리다이렉트 확인
-- driver 로그인 → `/` (모바일 홈) 진입
-- admin 로그인 → `/admin/dashboard` 진입
-- RLS 테스트: driver A가 driver B 기록 조회 불가
+- **Project ID**: qusiqhybzzuwhofryoql
+- **URL**: https://qusiqhybzzuwhofryoql.supabase.co
+- **Region**: Northeast Asia (Seoul)
 
 ---
 
-## 개발 규칙 (Claude 작업 지침)
-
-- **한 번에 하나의 TASK만** 구현 — 다른 TASK 파일은 건드리지 않음
-- **API 먼저, UI 나중** — 백엔드 Route Handler 완성 후 UI 연결
-- **타입 우선** — `src/types/database.ts` 기반으로 모든 데이터 모양 정의
-- **Supabase 클라이언트** — Server Component는 `lib/supabase/server.ts`, Client Component는 `lib/supabase/client.ts` 사용
-- **각 TASK 완료 시** — 이 파일의 태스크 상태와 날짜를 업데이트할 것
-
----
-
-## 환경 설정
+## 개발 환경 실행
 
 ```bash
-# 1. 의존성 설치
+cd vehicle-log-app
 npm install
-
-# 2. 환경변수 설정
-cp .env.example .env.local
-# → .env.local 에 Supabase 키 입력
-
-# 3. 개발 서버
-npm run dev  # http://localhost:3000
+cp .env.example .env.local  # Supabase 키 입력
+npm run dev                  # http://localhost:3000
 ```
 
-**Supabase 키 위치**: 대시보드 → Settings → API
+---
+
+*마지막 업데이트: 2026-06-06*
