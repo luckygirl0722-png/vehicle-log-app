@@ -37,16 +37,6 @@ export default function ApprovalClient({ trips }: ApprovalClientProps) {
 
   return (
     <>
-      {/* 헤더 */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold">승인 관리</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            승인 대기 <span className="font-semibold text-amber-600">{trips.length}건</span>
-          </p>
-        </div>
-      </div>
-
       {trips.length === 0 ? (
         <div className="rounded-xl border bg-background p-12 text-center space-y-3">
           <div className="text-4xl">✅</div>
