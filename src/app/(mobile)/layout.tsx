@@ -47,7 +47,9 @@ export default async function MobileLayout({ children }: { children: React.React
             return (
               <a key={href} href={href}
                 className={`flex-1 flex flex-col items-center py-2.5 text-xs gap-0.5 transition-colors relative
-                  ${isActive ? "text-primary font-semibold" : "text-muted-foreground hover:text-primary"}`}>
+                  ${isActive
+                    ? "text-primary font-semibold bg-primary/10"
+                    : "text-muted-foreground hover:text-primary hover:bg-muted/60"}`}>
                 {isActive && (
                   <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-primary rounded-b-full" />
                 )}
