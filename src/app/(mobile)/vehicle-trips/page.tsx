@@ -99,13 +99,8 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
         .order("departure_time", { ascending: false })
     : { data: null };
 
-  // ── 월 집계 (완료된 기록만) ──
-  const completed     = (trips ?? []).filter(t => t.arrival_time);
-  const bizTrips      = completed.filter(t => (t.trip_type ?? "업무") === "업무");
-  const comTrips      = completed.filter(t => t.trip_type === "출퇴근");
-  const perTrips      = completed.filter(t => t.trip_type === "개인사용");
-  const totalDistance = completed.reduce((s, t) => s + (t.distance_km ?? 0), 0);
-  const totalToll     = completed.reduce((s, t) => s + (t.toll_fee ?? 0), 0);
+  // ── 월 집계 (완료된 기록만, BulkSubmitSection용) ──
+  const completed = (trips ?? []).filter(t => t.arrival_time);
 
   // ── 미입력 구간 탐지 (km 기반 정렬) ──
   // 시간 순서와 무관하게 departure_km 오름차순으로 정렬 후 km 연속성 체크
@@ -175,52 +170,13 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
         ))}
       </div>
 
-      {/* 선택 차량 정보 */}
-      {selectedVehicle && (
-        <div className="mx-4 mb-3 rounded-xl bg-primary/5 border border-primary/20 px-4 py-3">
-          <p className="text-sm font-semibold text-primary">{selectedVehicle.plate_number}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">{selectedVehicle.model} · {selectedVehicle.purpose}</p>
+      {/* 공유 차량 안내 */}
+      {gapCount > 0 && (
+        <div className="mx-4 mb-2 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 flex items-center gap-2">
+          <span className="text-sm shrink-0">⚠️</span>
+          <p className="text-xs text-amber-700">미입력 구간 {gapCount}건이 있습니다. 아래에서 확인하세요.</p>
         </div>
       )}
-
-      {/* 공유 차량 안내 */}
-      <div className="mx-4 mb-3 rounded-xl bg-blue-50 border border-blue-200 px-3 py-2.5 flex items-start gap-2">
-        <span className="text-sm shrink-0">👥</span>
-        <p className="text-xs text-blue-700 leading-relaxed">
-          같은 차량의 모든 운전자 기록이 표시됩니다. <strong>내 기록만</strong> 수정·삭제할 수 있습니다.
-        </p>
-      </div>
-
-      {/* 유형별 집계 */}
-      <div className="mx-4 mb-2 rounded-xl border border-border bg-background overflow-hidden">
-        <div className="px-4 py-2 bg-muted/50 flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-semibold">🚗 업무 {bizTrips.length}건</span>
-          <span className="text-border">|</span>
-          <span className="text-xs font-semibold text-emerald-700">🏠 출퇴근 {comTrips.length}건</span>
-          <span className="text-border">|</span>
-          <span className="text-xs font-semibold text-orange-700">👤 개인 {perTrips.length}건</span>
-          {gapCount > 0 && (
-            <>
-              <span className="text-border">|</span>
-              <span className="text-xs font-semibold text-amber-700">⚠️ 미입력 {gapCount}건</span>
-            </>
-          )}
-        </div>
-        <div className="grid grid-cols-3 divide-x divide-border">
-          <div className="p-3 text-center">
-            <p className="text-xs text-muted-foreground">운행 건수</p>
-            <p className="text-base font-bold mt-0.5">{completed.length}<span className="text-xs font-normal ml-0.5">건</span></p>
-          </div>
-          <div className="p-3 text-center">
-            <p className="text-xs text-muted-foreground">총 운행거리</p>
-            <p className="text-base font-bold mt-0.5">{totalDistance.toLocaleString("ko-KR")}<span className="text-xs font-normal ml-0.5">km</span></p>
-          </div>
-          <div className="p-3 text-center">
-            <p className="text-xs text-muted-foreground">총 통행료</p>
-            <p className="text-base font-bold mt-0.5">{totalToll.toLocaleString("ko-KR")}<span className="text-xs font-normal ml-0.5">원</span></p>
-          </div>
-        </div>
-      </div>
 
       {/* 내 미제출 기록 일괄 제출 */}
       <BulkSubmitSection drafts={submitableDrafts} />
