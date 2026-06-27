@@ -56,6 +56,33 @@ interface Props {
   saveOnBlur?: boolean;
 }
 
+/* ── 최근 입력 버튼 (클라이언트 컴포넌트) ────────────────── */
+interface RecentBtnProps {
+  onSelect: (v: string) => void;
+  current: string;
+  max?: number;
+}
+export function RecentLocationButtons({ onSelect, current, max = 5 }: RecentBtnProps) {
+  const [recent, setRecent] = useState<string[]>([]);
+  useEffect(() => {
+    setRecent(getHistory().slice(0, max));
+  }, [max]);
+  if (!recent.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {recent.map(loc => (
+        <button key={loc} type="button" onClick={() => onSelect(loc)}
+          className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors
+            ${current === loc
+              ? "bg-primary text-primary-foreground border-primary"
+              : "bg-background border-border text-muted-foreground hover:text-foreground"}`}>
+          🕐 {loc}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function LocationAutocomplete({
   id, value, onChange, placeholder, required, className, saveOnBlur = false,
 }: Props) {

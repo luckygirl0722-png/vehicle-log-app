@@ -32,9 +32,9 @@ export default async function TripEndPage({ params, searchParams }: Props) {
         <h2 className="text-xl font-bold text-foreground">
           {isEditMode ? "운행 정보 수정" : "운행 완료"}
         </h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          {isEditMode ? "수정할 내용을 입력하세요" : "도착 정보를 입력해 주세요"}
-        </p>
+        {isEditMode && (
+          <p className="text-sm text-muted-foreground mt-1">수정할 내용을 입력하세요</p>
+        )}
       </div>
       <TripEndForm trip={trip as any} isEditMode={isEditMode} />
     </div>

@@ -1,7 +1,7 @@
 "use client";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import LocationAutocomplete, { saveLocationHistory } from "@/app/(mobile)/_components/LocationAutocomplete";
+import LocationAutocomplete, { saveLocationHistory, RecentLocationButtons } from "@/app/(mobile)/_components/LocationAutocomplete";
 
 interface Trip {
   id: string;
@@ -22,7 +22,7 @@ interface Props { trip: Trip; isEditMode?: boolean; }
 const TRIP_TYPES = ["업무", "출퇴근", "개인사용"] as const;
 const PURPOSES: Record<string, string[]> = {
   "업무":     ["고객사 방문","영업 미팅","부품 납품","자재 수령","현장 점검","사내 출장","기타"],
-  "출퇴근":   ["출근","퇴근","기타"],
+  "출퇴근":   ["출퇴근","출근","퇴근","기타"],
   "개인사용": ["개인 볼일","병원","장보기","가족 행사","기타"],
 };
 const TYPE_COLOR: Record<string, string> = {
@@ -75,9 +75,10 @@ export default function TripEndForm({ trip, isEditMode = false }: Props) {
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
   const depKmInt = parseInt(form.departure_km, 10);
-  const arrKm = parseInt(form.arrival_km, 10);
-  const estimatedDistance = !isNaN(arrKm) && !isNaN(depKmInt) && arrKm >= depKmInt
-    ? arrKm - depKmInt : null;
+  const arrKm    = parseInt(form.arrival_km, 10);
+  const hasArrKm = !isNaN(arrKm) && form.arrival_km !== "";
+  const distance = hasArrKm && !isNaN(depKmInt) ? arrKm - depKmInt : null;
+  const distanceInvalid = distance !== null && distance <= 0;
 
   const btnColor =
     depTripType === "출퇴근"   ? "bg-emerald-600" :
@@ -198,8 +199,13 @@ export default function TripEndForm({ trip, isEditMode = false }: Props) {
           {/* 출발지 */}
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">출발지</p>
-            <input type="text" value={form.departure_location} onChange={e => set("departure_location", e.target.value)} required
-              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+            <LocationAutocomplete
+              value={form.departure_location}
+              onChange={v => set("departure_location", v)}
+              placeholder="출발지를 입력하세요"
+              required
+              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
             <div className="flex gap-1.5 flex-wrap">
               {["자택", "삼우에레코 본사", "가산동 사무소", "사무실"].map(loc => (
                 <button key={loc} type="button" onClick={() => set("departure_location", loc)}
@@ -209,6 +215,10 @@ export default function TripEndForm({ trip, isEditMode = false }: Props) {
                 </button>
               ))}
             </div>
+            <RecentLocationButtons
+              onSelect={v => set("departure_location", v)}
+              current={form.departure_location}
+            />
           </div>
 
           {/* 출발 km */}
@@ -290,6 +300,10 @@ export default function TripEndForm({ trip, isEditMode = false }: Props) {
             </button>
           ))}
         </div>
+        <RecentLocationButtons
+          onSelect={v => set("arrival_location", v)}
+          current={form.arrival_location}
+        />
       </div>
 
       {/* 도착 km */}
@@ -303,14 +317,23 @@ export default function TripEndForm({ trip, isEditMode = false }: Props) {
             value={form.arrival_km}
             onChange={e => set("arrival_km", e.target.value)}
             required min={trip.departure_km}
-            className="w-full rounded-xl border border-input bg-background px-4 py-3 pr-14 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
+            className={`w-full rounded-xl border px-4 py-3 pr-14 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2
+              ${distanceInvalid
+                ? "border-destructive bg-destructive/5 focus:ring-destructive/50"
+                : "border-input bg-background focus:ring-primary/50"}`} />
           <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">km</span>
         </div>
-        {estimatedDistance !== null && (
-          <p className="text-sm text-primary font-medium">
-            운행거리: {estimatedDistance.toLocaleString("ko-KR")} km
-          </p>
-        )}
+        <div className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium
+          ${!hasArrKm ? "bg-muted text-muted-foreground" : distanceInvalid ? "bg-destructive/10 text-destructive" : "bg-primary/10 text-primary"}`}>
+          <span>운행거리</span>
+          <span>
+            {!hasArrKm
+              ? "km 입력 후 자동 계산"
+              : distanceInvalid
+                ? `⚠️ 오류 (출발 ${depKmInt.toLocaleString("ko-KR")}km 이상 입력)`
+                : `${distance!.toLocaleString("ko-KR")} km`}
+          </span>
+        </div>
       </div>
 
       {/* 통행료 */}
@@ -324,17 +347,6 @@ export default function TripEndForm({ trip, isEditMode = false }: Props) {
             onChange={e => set("toll_fee", e.target.value)} min="0"
             className="w-full rounded-xl border border-input bg-background px-4 py-3 pr-10 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
           <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">원</span>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          {[0, 900, 1800, 2700, 5500, 7700].map(fee => (
-            <button key={fee} type="button" onClick={() => set("toll_fee", String(fee))}
-              className={`rounded-full px-3 py-1.5 text-xs font-medium border transition-colors
-                ${parseInt(form.toll_fee) === fee
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-background text-foreground border-border"}`}>
-              {fee === 0 ? "없음" : fee.toLocaleString("ko-KR") + "원"}
-            </button>
-          ))}
         </div>
       </div>
 

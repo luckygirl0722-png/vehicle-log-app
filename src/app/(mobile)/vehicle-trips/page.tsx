@@ -96,6 +96,22 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
   const totalDistance = completed.reduce((s, t) => s + (t.distance_km ?? 0), 0);
   const totalToll     = completed.reduce((s, t) => s + (t.toll_fee ?? 0), 0);
 
+  /* KM 불일치 탐지 — trips는 descending(최신순). trips[i+1].arrival_km ≠ trips[i].departure_km */
+  const mismatchIds = new Set<string>();
+  if (trips) {
+    for (let i = 0; i < trips.length - 1; i++) {
+      const newer = trips[i];
+      const older  = trips[i + 1];
+      if (
+        older.arrival_km != null &&
+        newer.departure_km != null &&
+        older.arrival_km !== newer.departure_km
+      ) {
+        mismatchIds.add(newer.id); // 신규 기록의 출발km이 이전 도착km과 다름
+      }
+    }
+  }
+
   /* 미제출 제출 가능 기록 */
   const submitableDrafts = (trips ?? [])
     .filter(t => t.status === "draft" && t.arrival_time !== null)
@@ -186,7 +202,13 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
             const badgeCls   = TYPE_BADGE[tripType] ?? TYPE_BADGE["업무"];
             const statusInfo = STATUS_LABEL[trip.status] ?? STATUS_LABEL.draft;
             return (
-              <div key={trip.id} className="rounded-2xl bg-background border border-border p-4 space-y-2">
+              <div key={trip.id} className={`rounded-2xl border p-4 space-y-2 ${mismatchIds.has(trip.id) ? "bg-amber-50 border-amber-300" : "bg-background border-border"}`}>
+                {mismatchIds.has(trip.id) && (
+                  <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-100 rounded-lg px-3 py-1.5">
+                    <span>⚠️</span>
+                    <span>출발km이 이전 도착km과 다릅니다. 확인 후 수정해 주세요.</span>
+                  </div>
+                )}
                 {/* 날짜 + 운행유형 + 상태 */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
@@ -252,6 +274,13 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
           })}
         </div>
       )}
+      {/* 운행시작 버튼 */}
+      <div className="px-4 mt-4">
+        <a href="/trip/start"
+          className="flex items-center justify-center gap-2 w-full rounded-2xl bg-primary text-primary-foreground py-4 text-base font-semibold shadow-md">
+          🚗 운행 시작
+        </a>
+      </div>
     </div>
   );
 }

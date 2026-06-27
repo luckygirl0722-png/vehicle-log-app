@@ -1,7 +1,7 @@
 "use client";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import LocationAutocomplete, { saveLocationHistory } from "@/app/(mobile)/_components/LocationAutocomplete";
+import LocationAutocomplete, { saveLocationHistory, RecentLocationButtons } from "@/app/(mobile)/_components/LocationAutocomplete";
 
 interface Vehicle { id: string; plate_number: string; model: string; }
 interface Driver  { id: string; name: string; }
@@ -14,7 +14,7 @@ interface Props   {
 
 const PURPOSES: Record<string, string[]> = {
   "업무":   ["고객사 방문","영업 미팅","부품 납품","자재 수령","현장 점검","사내 출장","기타"],
-  "출퇴근": ["출근","퇴근","기타"],
+  "출퇴근": ["출퇴근","출근","퇴근","기타"],
   "개인사용": ["개인 볼일","병원","장보기","가족 행사","기타"],
 };
 
@@ -195,6 +195,10 @@ export default function TripStartForm({ vehicles, driver, lastKmMap, quickLocati
             ))}
           </div>
         )}
+        <RecentLocationButtons
+          onSelect={v => set("departure_location", v)}
+          current={form.departure_location}
+        />
       </div>
 
       {/* 출발 km */}

@@ -42,13 +42,20 @@ export default async function MobileLayout({ children }: { children: React.React
 
       <nav className="bg-background border-t border-border sticky bottom-0 z-40">
         <div className="flex">
-          {navItems.map(({ href, icon, label }) => (
-            <a key={href} href={href}
-              className="flex-1 flex flex-col items-center py-2.5 text-xs text-muted-foreground gap-0.5 hover:text-primary transition-colors">
-              <span className="text-base">{icon}</span>
-              <span>{label}</span>
-            </a>
-          ))}
+          {navItems.map(({ href, icon, label }) => {
+            const isActive = href === "/" ? pathname === "/" : pathname.startsWith(href);
+            return (
+              <a key={href} href={href}
+                className={`flex-1 flex flex-col items-center py-2.5 text-xs gap-0.5 transition-colors relative
+                  ${isActive ? "text-primary font-semibold" : "text-muted-foreground hover:text-primary"}`}>
+                {isActive && (
+                  <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-primary rounded-b-full" />
+                )}
+                <span className="text-base">{icon}</span>
+                <span>{label}</span>
+              </a>
+            );
+          })}
         </div>
       </nav>
     </div>
