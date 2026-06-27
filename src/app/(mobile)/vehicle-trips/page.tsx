@@ -270,8 +270,8 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
                     </a>
                   )}
 
-                  {/* 내 draft 완료 기록 → 수정/삭제 */}
-                  {trip.status === "draft" && !isOngoing && isMyTrip && (
+                  {/* 내 기록 수정/삭제 (draft·submitted — 승인 전까지 가능) */}
+                  {(trip.status === "draft" || trip.status === "submitted") && !isOngoing && isMyTrip && (
                     <TripActionButtons tripId={trip.id} />
                   )}
 
