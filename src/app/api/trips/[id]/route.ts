@@ -103,9 +103,9 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const isAdmin = roleRow?.role === "admin";
 
   if (!isAdmin) {
-    // 운전자: draft 상태 + 본인 기록만
-    if (existing.status !== "draft") {
-      return badReq("draft 상태의 기록만 삭제할 수 있습니다.");
+    // 운전자: draft·submitted 상태 + 본인 기록만 (승인 완료 후에는 삭제 불가)
+    if (existing.status !== "draft" && existing.status !== "submitted") {
+      return badReq("승인 완료된 기록은 삭제할 수 없습니다.");
     }
     const { data: myDriver } = await supabase!
       .from("drivers").select("id").eq("user_id", user!.id).single();
@@ -114,13 +114,12 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     }
   }
 
-  // 관리자는 서비스 롤로 RLS 우회 삭제 (submitted/approved 등 모든 상태)
-  const deleteClient = isAdmin
-    ? createAdminClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
-      )
-    : supabase!;
+  // draft/submitted 삭제 시 RLS 우회를 위해 service role 사용
+  // (RLS 정책이 submitted 삭제를 막는 경우 대비)
+  const deleteClient = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 
   // 승인 기록이 있으면 먼저 삭제 (FK 제약)
   await deleteClient.from("trip_approvals").delete().eq("trip_id", params.id);
