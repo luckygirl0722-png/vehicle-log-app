@@ -107,25 +107,30 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
   const totalDistance = completed.reduce((s, t) => s + (t.distance_km ?? 0), 0);
   const totalToll     = completed.reduce((s, t) => s + (t.toll_fee ?? 0), 0);
 
-  // ── 미입력 구간 탐지 ──
-  // trips는 descending. trips[i]=최신, trips[i+1]=이전
-  // 갭 발생: trips[i+1].arrival_km ≠ trips[i].departure_km 이고 양수 차이
-  // 갭 카드는 trips[i] 카드 바로 아래에 삽입
+  // ── 미입력 구간 탐지 (km 기반 정렬) ──
+  // 시간 순서와 무관하게 departure_km 오름차순으로 정렬 후 km 연속성 체크
+  // → 소급 입력된 기록이 오늘 날짜로 저장되어도 km 기준으로 갭이 채워졌는지 정확히 판단
+  // 화면은 시간 내림차순이므로, 갭은 "높은 km 카드(화면 위쪽)" 바로 아래에 표시
   const gapAfterTrip = new Map<string, GapInfo>();
   if (trips) {
-    for (let i = 0; i < trips.length - 1; i++) {
-      const newer = trips[i];
-      const older  = trips[i + 1];
+    const kmSorted = [...trips]
+      .filter(t => t.arrival_km != null)
+      .sort((a, b) => (a.departure_km ?? 0) - (b.departure_km ?? 0));
+
+    for (let i = 0; i < kmSorted.length - 1; i++) {
+      const lower  = kmSorted[i];      // 낮은 km (화면에서 아래쪽)
+      const higher = kmSorted[i + 1];  // 높은 km (화면에서 위쪽)
       if (
-        older.arrival_km   != null &&
-        newer.departure_km != null &&
-        older.arrival_km   !== newer.departure_km &&
-        newer.departure_km  > older.arrival_km
+        lower.arrival_km   != null &&
+        higher.departure_km != null &&
+        lower.arrival_km   !== higher.departure_km &&
+        higher.departure_km > lower.arrival_km
       ) {
-        gapAfterTrip.set(newer.id, {
-          fromKm: older.arrival_km,
-          toKm:   newer.departure_km,
-          gapKm:  newer.departure_km - older.arrival_km,
+        // 화면 표시 순서에서 higher 카드 바로 아래에 갭 카드 삽입
+        gapAfterTrip.set(higher.id, {
+          fromKm: lower.arrival_km,
+          toKm:   higher.departure_km,
+          gapKm:  higher.departure_km - lower.arrival_km,
         });
       }
     }

@@ -39,6 +39,9 @@ export default function RetroactiveForm({ vehicleId, plateNumber, vehicleModel, 
   const [error, setError]   = useState<string | null>(null);
   const [tripType, setTripType] = useState<"업무" | "출퇴근" | "개인사용">("업무");
   const [customPurpose, setCustomPurpose] = useState(false);
+  const [depKm, setDepKm] = useState(fromKm);
+  const [arrKm, setArrKm] = useState(toKm);
+  const calcKm = arrKm - depKm;
 
   const now = new Date();
   const [form, setForm] = useState({
@@ -53,7 +56,6 @@ export default function RetroactiveForm({ vehicleId, plateNumber, vehicleModel, 
   });
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  const gapKm    = toKm - fromKm;
   const btnColor = tripType === "출퇴근" ? "bg-emerald-600" : tripType === "개인사용" ? "bg-orange-500" : "bg-primary";
 
   function handleTypeChange(t: "업무" | "출퇴근" | "개인사용") {
@@ -80,6 +82,8 @@ export default function RetroactiveForm({ vehicleId, plateNumber, vehicleModel, 
     if (!form.departure_location.trim()) { setError("출발지를 입력하세요."); return; }
     if (!form.arrival_location.trim())   { setError("도착지를 입력하세요."); return; }
     if (!form.purpose.trim())            { setError("목적을 입력하세요."); return; }
+    if (arrKm <= depKm)                  { setError(`도착km(${arrKm})은 출발km(${depKm})보다 커야 합니다.`); return; }
+    if (depKm < fromKm || arrKm > toKm)  { setError(`km은 구간 범위(${fromKm}~${toKm}) 안에 있어야 합니다.`); return; }
 
     startTransition(async () => {
       saveLocationHistory(form.departure_location);
@@ -98,8 +102,8 @@ export default function RetroactiveForm({ vehicleId, plateNumber, vehicleModel, 
           arrival_time:       arrTime.toISOString(),
           departure_location: form.departure_location,
           arrival_location:   form.arrival_location,
-          departure_km:       fromKm,
-          arrival_km:         toKm,
+          departure_km:       depKm,
+          arrival_km:         arrKm,
           toll_fee:           0,
           purpose:            purposeLabel,
           trip_type:          tripType,
@@ -120,17 +124,17 @@ export default function RetroactiveForm({ vehicleId, plateNumber, vehicleModel, 
 
       {/* 소급 입력 정보 배너 */}
       <div className="rounded-xl bg-amber-50 border border-amber-300 px-4 py-3 space-y-1.5">
-        <p className="text-xs font-semibold text-amber-800">⚠️ 소급 입력 구간</p>
-        <div className="flex items-center gap-2 text-sm">
-          <span className="bg-white border border-amber-300 rounded-lg px-2.5 py-1 font-bold text-amber-900">
+        <p className="text-xs font-semibold text-amber-800">⚠️ 미입력 구간 소급 입력</p>
+        <div className="flex items-center gap-2 text-xs text-amber-700">
+          <span className="bg-white border border-amber-300 rounded-lg px-2.5 py-1 font-semibold">
             {fromKm.toLocaleString("ko-KR")} km
           </span>
-          <span className="flex-1 text-center text-xs text-amber-500">· · · {gapKm.toLocaleString("ko-KR")} km · · ·</span>
-          <span className="bg-white border border-amber-300 rounded-lg px-2.5 py-1 font-bold text-amber-900">
+          <span className="flex-1 text-center text-amber-400">· · · {(toKm - fromKm).toLocaleString("ko-KR")} km 구간 · · ·</span>
+          <span className="bg-white border border-amber-300 rounded-lg px-2.5 py-1 font-semibold">
             {toKm.toLocaleString("ko-KR")} km
           </span>
         </div>
-        <p className="text-xs text-amber-700">계기판 km은 고정됩니다. 날짜, 시간, 장소, 목적을 입력하세요.</p>
+        <p className="text-xs text-amber-700">💡 여러 건으로 나눌 경우 아래 km을 직접 수정하세요.</p>
       </div>
 
       {/* 차량 정보 (고정) */}
@@ -222,31 +226,49 @@ export default function RetroactiveForm({ vehicleId, plateNumber, vehicleModel, 
         <RecentLocationButtons onSelect={v => set("arrival_location", v)} current={form.arrival_location} />
       </div>
 
-      {/* 계기판 km (고정) */}
+      {/* 계기판 km (수정 가능) */}
       <div className="space-y-2">
-        <label className="text-sm font-semibold">계기판 km</label>
+        <label className="text-sm font-semibold">계기판 km <span className="text-destructive">*</span></label>
         <div className="grid grid-cols-3 gap-2">
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground text-center">출발km</p>
-            <div className="rounded-xl bg-primary/10 border border-primary/30 px-3 py-3 text-center text-sm font-bold text-primary">
-              {fromKm.toLocaleString("ko-KR")}
-            </div>
+            <input
+              type="number"
+              min={fromKm}
+              max={toKm - 1}
+              value={depKm}
+              onChange={e => setDepKm(parseInt(e.target.value) || 0)}
+              className="w-full rounded-xl border border-primary/40 bg-primary/5 px-2 py-3 text-center text-sm font-bold text-primary focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
           </div>
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground text-center">도착km</p>
-            <div className="rounded-xl bg-primary/10 border border-primary/30 px-3 py-3 text-center text-sm font-bold text-primary">
-              {toKm.toLocaleString("ko-KR")}
-            </div>
+            <input
+              type="number"
+              min={fromKm + 1}
+              max={toKm}
+              value={arrKm}
+              onChange={e => setArrKm(parseInt(e.target.value) || 0)}
+              className="w-full rounded-xl border border-primary/40 bg-primary/5 px-2 py-3 text-center text-sm font-bold text-primary focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
           </div>
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground text-center">운행거리</p>
-            <div className="rounded-xl bg-emerald-50 border border-emerald-300 px-3 py-3 text-center text-sm font-bold text-emerald-700">
-              {gapKm.toLocaleString("ko-KR")} km
+            <div className={`rounded-xl px-2 py-3 text-center text-sm font-bold
+              ${calcKm > 0
+                ? "bg-emerald-50 border border-emerald-300 text-emerald-700"
+                : "bg-red-50 border border-red-300 text-red-600"}`}>
+              {calcKm > 0 ? `${calcKm.toLocaleString("ko-KR")} km` : "오류"}
             </div>
           </div>
         </div>
-        <p className="text-xs text-muted-foreground flex items-center gap-1">
-          🔒 km 연속성 유지를 위해 고정됩니다
+        <p className="text-xs text-muted-foreground">
+          구간 범위: {fromKm.toLocaleString("ko-KR")} ~ {toKm.toLocaleString("ko-KR")} km
+          {arrKm < toKm && calcKm > 0 && (
+            <span className="ml-1 text-amber-600 font-medium">
+              · 남은 구간 {(toKm - arrKm).toLocaleString("ko-KR")} km은 별도 입력하세요
+            </span>
+          )}
         </p>
       </div>
 
