@@ -61,12 +61,17 @@ interface RecentBtnProps {
   onSelect: (v: string) => void;
   current: string;
   max?: number;
+  /** 이미 빠른선택 버튼에 표시된 항목 — 최근 이력에서 제외해 중복 방지 */
+  exclude?: string[];
 }
-export function RecentLocationButtons({ onSelect, current, max = 5 }: RecentBtnProps) {
+export function RecentLocationButtons({ onSelect, current, max = 5, exclude = [] }: RecentBtnProps) {
   const [recent, setRecent] = useState<string[]>([]);
   useEffect(() => {
-    setRecent(getHistory().slice(0, max));
-  }, [max]);
+    const filtered = getHistory()
+      .filter(l => !exclude.includes(l))
+      .slice(0, max);
+    setRecent(filtered);
+  }, [max, exclude.join(",")]);
   if (!recent.length) return null;
   return (
     <div className="flex flex-wrap gap-1.5">

@@ -198,6 +198,7 @@ export default function TripStartForm({ vehicles, driver, lastKmMap, quickLocati
         <RecentLocationButtons
           onSelect={v => set("departure_location", v)}
           current={form.departure_location}
+          exclude={quickLocations}
         />
       </div>
 

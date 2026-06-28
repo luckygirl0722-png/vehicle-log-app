@@ -201,7 +201,7 @@ export default function RetroactiveForm({ vehicleId, plateNumber, vehicleModel, 
             </button>
           ))}
         </div>
-        <RecentLocationButtons onSelect={v => set("departure_location", v)} current={form.departure_location} />
+        <RecentLocationButtons onSelect={v => set("departure_location", v)} current={form.departure_location} exclude={["삼우에레코 본사", "가산동 사무소", "사무실", "자택"]} />
       </div>
 
       {/* 도착지 */}
@@ -223,7 +223,7 @@ export default function RetroactiveForm({ vehicleId, plateNumber, vehicleModel, 
             </button>
           ))}
         </div>
-        <RecentLocationButtons onSelect={v => set("arrival_location", v)} current={form.arrival_location} />
+        <RecentLocationButtons onSelect={v => set("arrival_location", v)} current={form.arrival_location} exclude={["자택", "삼우에레코 본사", "가산동 사무소", "사무실"]} />
       </div>
 
       {/* 계기판 km (수정 가능) */}
