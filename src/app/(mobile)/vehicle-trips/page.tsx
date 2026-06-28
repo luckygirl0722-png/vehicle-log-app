@@ -75,7 +75,6 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
   const nextMonth    = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1);
   const prevParam    = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, "0")}`;
   const nextParam    = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}`;
-  const isCurrentMonth = selectedMonth.getMonth() === now.getMonth() && selectedMonth.getFullYear() === now.getFullYear();
   const monthLabel   = selectedMonth.toLocaleDateString("ko-KR", { year: "numeric", month: "long" });
 
   // ── 서비스 롤로 차량 전체 운전자 기록 조회 (RLS 우회) ──
@@ -153,7 +152,7 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
         <Link href={`/vehicle-trips?vehicle_id=${selectedVehicleId}&month=${prevParam}`} className="p-2 rounded-lg hover:bg-muted">&lt;</Link>
         <span className="font-semibold text-sm">{monthLabel}</span>
         <Link href={`/vehicle-trips?vehicle_id=${selectedVehicleId}&month=${nextParam}`}
-          className={isCurrentMonth ? "opacity-30 pointer-events-none p-2" : "p-2 rounded-lg hover:bg-muted"}>&gt;</Link>
+          className="p-2 rounded-lg hover:bg-muted">&gt;</Link>
       </div>
 
       {/* 차량 선택 탭 */}

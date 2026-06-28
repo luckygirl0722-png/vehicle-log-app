@@ -36,9 +36,9 @@ export default function TripFilters({ vehicles, drivers }: TripFiltersProps) {
   );
 
   const now = new Date();
-  // 최근 6개월 옵션
-  const monthOptions = Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+  // 과거 12개월 + 미래 3개월 옵션 (총 16개월, 최신 순)
+  const monthOptions = Array.from({ length: 16 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() + 3 - i, 1);
     const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     const l = `${d.getFullYear()}년 ${d.getMonth() + 1}월`;
     return { value: v, label: l };
