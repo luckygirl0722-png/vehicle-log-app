@@ -44,6 +44,12 @@ function toLocalTimeStr(iso: string) {
   const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
   return `${pad(kst.getUTCHours())}:${pad(kst.getUTCMinutes())}`;
 }
+/** 도착 기본 시각: max(현재시각, 출발시각+1분) — 출발이 미래면 출발+1분으로 설정 */
+function defaultArrivalIso(departurIso: string): string {
+  const dep = new Date(departurIso);
+  const now = new Date();
+  return now > dep ? now.toISOString() : new Date(dep.getTime() + 60_000).toISOString();
+}
 
 export default function TripEndForm({ trip, isEditMode = false }: Props) {
   const router = useRouter();
@@ -68,9 +74,13 @@ export default function TripEndForm({ trip, isEditMode = false }: Props) {
     arrival_km:       isEditMode ? String(trip.arrival_km ?? "")  : "",
     toll_fee:         isEditMode ? String(trip.toll_fee ?? "0")   : "0",
     note:             isEditMode ? (trip.note ?? "")              : "",
-    // 도착 시간 (수정 모드만)
-    arr_date:         isEditMode && trip.arrival_time ? toLocalDateStr(trip.arrival_time) : toLocalDateStr(trip.departure_time),
-    arr_time:         isEditMode && trip.arrival_time ? toLocalTimeStr(trip.arrival_time) : "",
+    // 도착 시간 (항상 표시 — 기본값: 수정모드=기존값, 신규=max(현재,출발+1분))
+    arr_date:         isEditMode && trip.arrival_time
+      ? toLocalDateStr(trip.arrival_time)
+      : toLocalDateStr(defaultArrivalIso(trip.departure_time)),
+    arr_time:         isEditMode && trip.arrival_time
+      ? toLocalTimeStr(trip.arrival_time)
+      : toLocalTimeStr(defaultArrivalIso(trip.departure_time)),
   });
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
@@ -145,6 +155,7 @@ export default function TripEndForm({ trip, isEditMode = false }: Props) {
         });
       } else {
         // 신규 도착 등록 → /api/trips/[id]/end
+        const arrTimeISO = new Date(`${form.arr_date}T${form.arr_time}`).toISOString();
         res = await fetch(`/api/trips/${trip.id}/end`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -152,6 +163,7 @@ export default function TripEndForm({ trip, isEditMode = false }: Props) {
             arrival_location: form.arrival_location,
             arrival_km:       arrivalKm,
             toll_fee:         tollFee,
+            arrival_time:     arrTimeISO,
             note:             form.note || undefined,
           }),
         });
@@ -264,18 +276,16 @@ export default function TripEndForm({ trip, isEditMode = false }: Props) {
         </div>
       )}
 
-      {/* 도착 일시 (수정 모드만) */}
-      {isEditMode && (
-        <div className="space-y-2">
-          <label className="text-sm font-semibold">도착 일시</label>
-          <div className="grid grid-cols-2 gap-2">
-            <input type="date" value={form.arr_date} onChange={e => set("arr_date", e.target.value)}
-              className="w-full rounded-xl border border-input bg-background px-3 py-3 text-base focus:outline-none focus:ring-2 focus:ring-primary/50" />
-            <input type="time" value={form.arr_time} onChange={e => set("arr_time", e.target.value)}
-              className="w-full rounded-xl border border-input bg-background px-3 py-3 text-base focus:outline-none focus:ring-2 focus:ring-primary/50" />
-          </div>
+      {/* 도착 일시 (항상 표시) */}
+      <div className="space-y-2">
+        <label className="text-sm font-semibold">도착 일시 <span className="text-destructive">*</span></label>
+        <div className="grid grid-cols-2 gap-2">
+          <input type="date" value={form.arr_date} onChange={e => set("arr_date", e.target.value)} required
+            className="w-full rounded-xl border border-input bg-background px-3 py-3 text-base focus:outline-none focus:ring-2 focus:ring-primary/50" />
+          <input type="time" value={form.arr_time} onChange={e => set("arr_time", e.target.value)} required
+            className="w-full rounded-xl border border-input bg-background px-3 py-3 text-base focus:outline-none focus:ring-2 focus:ring-primary/50" />
         </div>
-      )}
+      </div>
 
       {/* 도착지 */}
       <div className="space-y-2">

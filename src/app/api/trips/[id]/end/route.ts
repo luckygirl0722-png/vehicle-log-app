@@ -60,11 +60,20 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     );
   }
 
+  const arrivalTime = parsed.data.arrival_time ?? new Date().toISOString();
+
+  // 도착 시간 > 출발 시간 검증
+  if (new Date(arrivalTime) <= new Date(trip.departure_time)) {
+    return badReq(
+      `도착 시간이 출발 시간(${new Date(trip.departure_time).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })})보다 이후여야 합니다.`
+    );
+  }
+
   const updateData = {
     arrival_location: parsed.data.arrival_location,
     arrival_km:       parsed.data.arrival_km,
     toll_fee:         parsed.data.toll_fee,
-    arrival_time:     parsed.data.arrival_time ?? new Date().toISOString(),
+    arrival_time:     arrivalTime,
     note:             parsed.data.note,
   };
 
