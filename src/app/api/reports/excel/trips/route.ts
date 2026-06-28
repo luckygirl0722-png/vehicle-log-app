@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
   const period = monthParam
     ? (() => { const [y,m] = monthParam.split("-"); return `${y}년 ${m}월`; })()
     : `${now.getFullYear()}년 전체`;
-  const generatedAt = now.toLocaleString("ko-KR", { year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit" });
+  const generatedAt = now.toLocaleString("ko-KR", { timeZone:"Asia/Seoul", year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit" });
 
   // ── 스타일 정의 ───────────────────────────────────────────
   const S = {
@@ -156,7 +156,7 @@ export async function GET(request: NextRequest) {
 
   // Row 4~: 데이터
   const fmt = (iso: string | null) => iso
-    ? new Date(iso).toLocaleString("ko-KR", { year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit" })
+    ? new Date(iso).toLocaleString("ko-KR", { timeZone:"Asia/Seoul", year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit" })
     : "—";
 
   trips.forEach((trip: any, i) => {

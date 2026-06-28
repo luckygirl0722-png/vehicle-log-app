@@ -76,8 +76,8 @@ export async function GET(request: NextRequest) {
   const trips: TripRowData[] = rawTrips.map((t, i) => {
     const dep = new Date(t.departure_time);
     const arr = t.arrival_time ? new Date(t.arrival_time) : null;
-    const fmt = (d: Date) => d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
-    const fmtDate = (d: Date) => d.toLocaleDateString("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit" }).replace(/\. /g, "-").replace(".", "");
+    const fmt = (d: Date) => d.toLocaleTimeString("ko-KR", { timeZone:"Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false });
+    const fmtDate = (d: Date) => d.toLocaleDateString("ko-KR", { timeZone:"Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).replace(/\. /g, "-").replace(".", "");
     return {
       no:                 i + 1,
       date:               fmtDate(dep),
