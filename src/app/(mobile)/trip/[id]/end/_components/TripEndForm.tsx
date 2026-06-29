@@ -1,7 +1,7 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import LocationAutocomplete, { saveLocationHistory, RecentLocationButtons } from "@/app/(mobile)/_components/LocationAutocomplete";
+import LocationAutocomplete, { saveLocationHistory } from "@/app/(mobile)/_components/LocationAutocomplete";
 
 interface Trip {
   id: string;
@@ -51,12 +51,28 @@ function defaultArrivalIso(departurIso: string): string {
   return now > dep ? now.toISOString() : new Date(dep.getTime() + 60_000).toISOString();
 }
 
+const QUICK_LOCS = ["자택", "삼우에레코 본사", "가산동 사무소", "사무실"];
+
+function getRecentLocations(exclude: string[], max = 5): string[] {
+  try {
+    const stored = JSON.parse(localStorage.getItem("location_history") || "[]") as string[];
+    return stored.filter(l => !exclude.includes(l)).slice(0, max);
+  } catch { return []; }
+}
+
 export default function TripEndForm({ trip, isEditMode = false }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isCancelling, startCancel]  = useTransition();
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recentLocs, setRecentLocs] = useState<string[]>([]);
+
+  useEffect(() => {
+    setRecentLocs(getRecentLocations(QUICK_LOCS));
+  }, []);
+
+  const combinedLocs = [...QUICK_LOCS, ...recentLocs];
 
   const initTripType = (trip.trip_type ?? "업무") as "업무" | "출퇴근" | "개인사용";
   const [depTripType, setDepTripType] = useState<"업무" | "출퇴근" | "개인사용">(initTripType);
@@ -218,20 +234,15 @@ export default function TripEndForm({ trip, isEditMode = false }: Props) {
               required
               className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
-            <div className="flex gap-1.5 flex-wrap">
-              {["자택", "삼우에레코 본사", "가산동 사무소", "사무실"].map(loc => (
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none", msOverflowStyle: "none" } as React.CSSProperties}>
+              {combinedLocs.map(loc => (
                 <button key={loc} type="button" onClick={() => set("departure_location", loc)}
-                  className={`rounded-full px-2.5 py-1 text-xs font-medium border transition-colors
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium border whitespace-nowrap shrink-0 transition-colors
                     ${form.departure_location === loc ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border text-muted-foreground"}`}>
                   {loc}
                 </button>
               ))}
             </div>
-            <RecentLocationButtons
-              onSelect={v => set("departure_location", v)}
-              current={form.departure_location}
-              exclude={["자택", "삼우에레코 본사", "가산동 사무소", "사무실"]}
-            />
           </div>
 
           {/* 출발 km */}
@@ -287,56 +298,58 @@ export default function TripEndForm({ trip, isEditMode = false }: Props) {
         </div>
       </div>
 
-      {/* 도착지 */}
-      <div className="space-y-2">
-        <label htmlFor="arr_loc" className="text-sm font-semibold">
-          목적지 <span className="text-destructive">*</span>
-        </label>
-        <LocationAutocomplete
-          id="arr_loc"
-          value={form.arrival_location}
-          onChange={v => set("arrival_location", v)}
-          placeholder="목적지를 입력하세요"
-          required
-          className="w-full rounded-xl border border-input bg-background px-4 py-3 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-        />
-        <div className="flex gap-2 flex-wrap">
-          {["자택", "삼우에레코 본사", "가산동 사무소", "사무실"].map(loc => (
-            <button key={loc} type="button" onClick={() => set("arrival_location", loc)}
-              className={`rounded-full px-3 py-1.5 text-xs font-medium border transition-colors
-                ${form.arrival_location === loc
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-background text-foreground border-border"}`}>
-              {loc}
-            </button>
-          ))}
-        </div>
-        <RecentLocationButtons
-          onSelect={v => set("arrival_location", v)}
-          current={form.arrival_location}
-          exclude={["자택", "삼우에레코 본사", "가산동 사무소", "사무실"]}
-        />
-      </div>
+      {/* ── 목적지 / 도착km / 통행료 — 한줄 그리드 레이아웃 ── */}
+      <div className="rounded-xl border border-border bg-background overflow-hidden divide-y divide-border">
 
-      {/* 도착 km */}
-      <div className="space-y-2">
-        <label htmlFor="arr_km" className="text-sm font-semibold">
-          도착 계기판 km <span className="text-destructive">*</span>
-        </label>
-        <div className="relative">
-          <input id="arr_km" type="number" inputMode="numeric"
-            placeholder="도착 계기판 km 입력"
-            value={form.arrival_km}
-            onChange={e => set("arrival_km", e.target.value)}
-            required min={trip.departure_km}
-            className={`w-full rounded-xl border px-4 py-3 pr-14 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2
-              ${distanceInvalid
-                ? "border-destructive bg-destructive/5 focus:ring-destructive/50"
-                : "border-input bg-background focus:ring-primary/50"}`} />
-          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">km</span>
+        {/* 목적지 */}
+        <div className="flex items-start px-4 py-3 gap-3">
+          <span className="w-[4.5rem] text-sm font-medium text-muted-foreground shrink-0 pt-2.5">목적지</span>
+          <div className="flex-1 space-y-2 min-w-0">
+            <LocationAutocomplete
+              id="arr_loc"
+              value={form.arrival_location}
+              onChange={v => set("arrival_location", v)}
+              placeholder="목적지를 입력하세요"
+              required
+              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+            {/* 빠른선택 + 최근이력 — 가로 스크롤 한줄 */}
+            {combinedLocs.length > 0 && (
+              <div className="flex gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none", msOverflowStyle: "none" } as React.CSSProperties}>
+                {combinedLocs.map(loc => (
+                  <button key={loc} type="button" onClick={() => set("arrival_location", loc)}
+                    className={`rounded-full px-3 py-1 text-xs font-medium border whitespace-nowrap shrink-0 transition-colors
+                      ${form.arrival_location === loc
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background border-border text-muted-foreground hover:text-foreground"}`}>
+                    {loc}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-        <div className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium
-          ${!hasArrKm ? "bg-muted text-muted-foreground" : distanceInvalid ? "bg-destructive/10 text-destructive" : "bg-primary/10 text-primary"}`}>
+
+        {/* 도착 km */}
+        <div className="flex items-center px-4 py-3 gap-3">
+          <span className="w-[4.5rem] text-sm font-medium text-muted-foreground shrink-0">도착 km</span>
+          <div className="relative flex-1">
+            <input id="arr_km" type="number" inputMode="numeric"
+              placeholder="계기판 숫자 입력하세요"
+              value={form.arrival_km}
+              onChange={e => set("arrival_km", e.target.value)}
+              required min={trip.departure_km}
+              className={`w-full rounded-lg border px-3 py-2.5 pr-10 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2
+                ${distanceInvalid
+                  ? "border-destructive bg-destructive/5 focus:ring-destructive/50"
+                  : "border-input bg-background focus:ring-primary/50"}`} />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">km</span>
+          </div>
+        </div>
+
+        {/* 운행거리 표시 */}
+        <div className={`flex items-center justify-between px-4 py-2 text-xs font-medium
+          ${!hasArrKm ? "bg-muted text-muted-foreground" : distanceInvalid ? "bg-destructive/10 text-destructive" : "bg-primary/5 text-primary"}`}>
           <span>운행거리</span>
           <span>
             {!hasArrKm
@@ -346,20 +359,19 @@ export default function TripEndForm({ trip, isEditMode = false }: Props) {
                 : `${distance!.toLocaleString("ko-KR")} km`}
           </span>
         </div>
-      </div>
 
-      {/* 통행료 */}
-      <div className="space-y-2">
-        <label htmlFor="toll" className="text-sm font-semibold">
-          통행료 <span className="text-muted-foreground text-xs font-normal">(선택)</span>
-        </label>
-        <div className="relative">
-          <input id="toll" type="number" inputMode="numeric" placeholder="0"
-            value={form.toll_fee}
-            onChange={e => set("toll_fee", e.target.value)} min="0"
-            className="w-full rounded-xl border border-input bg-background px-4 py-3 pr-10 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
-          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">원</span>
+        {/* 통행료 */}
+        <div className="flex items-center px-4 py-3 gap-3">
+          <span className="w-[4.5rem] text-sm font-medium text-muted-foreground shrink-0">통행료</span>
+          <div className="relative flex-1">
+            <input id="toll" type="number" inputMode="numeric" placeholder="0"
+              value={form.toll_fee}
+              onChange={e => set("toll_fee", e.target.value)} min="0"
+              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 pr-8 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">원</span>
+          </div>
         </div>
+
       </div>
 
       {/* 비고 */}

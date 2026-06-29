@@ -1,7 +1,7 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import LocationAutocomplete, { saveLocationHistory, RecentLocationButtons } from "@/app/(mobile)/_components/LocationAutocomplete";
+import LocationAutocomplete, { saveLocationHistory } from "@/app/(mobile)/_components/LocationAutocomplete";
 
 interface Vehicle { id: string; plate_number: string; model: string; }
 interface Driver  { id: string; name: string; }
@@ -13,8 +13,8 @@ interface Props   {
 }
 
 const PURPOSES: Record<string, string[]> = {
-  "업무":   ["고객사 방문","영업 미팅","부품 납품","자재 수령","현장 점검","사내 출장","기타"],
-  "출퇴근": ["출퇴근","출근","퇴근","기타"],
+  "업무":     ["고객사 방문","영업 미팅","부품 납품","자재 수령","현장 점검","사내 출장","기타"],
+  "출퇴근":   ["출퇴근","출근","퇴근","기타"],
   "개인사용": ["개인 볼일","병원","장보기","가족 행사","기타"],
 };
 
@@ -24,17 +24,21 @@ const TYPE_STYLE: Record<string, { active: string; btn: string; emoji: string }>
   "개인사용": { active: "bg-orange-500 text-white border-orange-500",          btn: "bg-orange-500 text-white",            emoji: "👤" },
 };
 
-function toLocalDateTimeString(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-function toLocalDateString(d: Date): string {
+function toLocalDateString(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
-function toLocalTimeString(d: Date): string {
+function toLocalTimeString(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** 로컬스토리지에서 최근 위치 이력 읽기 (quick 목록 제외) */
+function getRecentLocations(exclude: string[], max = 5): string[] {
+  try {
+    const stored = JSON.parse(localStorage.getItem("location_history") || "[]") as string[];
+    return stored.filter(l => !exclude.includes(l)).slice(0, max);
+  } catch { return []; }
 }
 
 export default function TripStartForm({ vehicles, driver, lastKmMap, quickLocations }: Props) {
@@ -43,17 +47,23 @@ export default function TripStartForm({ vehicles, driver, lastKmMap, quickLocati
   const [error, setError]      = useState<string | null>(null);
   const [tripType, setTripType] = useState<"업무" | "출퇴근" | "개인사용">("업무");
   const [customPurpose, setCustomPurpose] = useState(false);
+  const [recentLocs, setRecentLocs] = useState<string[]>([]);
   const now = new Date();
 
   const [form, setForm] = useState({
     vehicle_id:         vehicles[0]?.id ?? "",
     departure_location: "",
-    departure_km:       lastKmMap[vehicles[0]?.id ?? ""] ? String(lastKmMap[vehicles[0]?.id ?? ""]) : "",
+    departure_km:       lastKmMap[vehicles[0]?.id ?? ""] !== undefined ? String(lastKmMap[vehicles[0]?.id ?? ""]) : "",
     purpose:            PURPOSES["업무"][0],
     departure_date:     toLocalDateString(now),
     departure_time_val: toLocalTimeString(now),
   });
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+
+  // 최근 위치 이력 불러오기
+  useEffect(() => {
+    setRecentLocs(getRecentLocations(quickLocations));
+  }, [quickLocations.join(",")]);
 
   function handleVehicleSelect(vehicleId: string) {
     const lastKm = lastKmMap[vehicleId];
@@ -74,6 +84,7 @@ export default function TripStartForm({ vehicles, driver, lastKmMap, quickLocati
   const purposes = PURPOSES[tripType];
   const lastKm   = lastKmMap[form.vehicle_id];
   const style    = TYPE_STYLE[tripType];
+  const combinedDepLocs = [...quickLocations, ...recentLocs];
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -88,13 +99,13 @@ export default function TripStartForm({ vehicles, driver, lastKmMap, quickLocati
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          vehicle_id: form.vehicle_id,
-          driver_id:  driver.id,
+          vehicle_id:         form.vehicle_id,
+          driver_id:          driver.id,
           departure_location: form.departure_location,
-          departure_km: depKm,
-          purpose: purposeLabel,
-          departure_time: new Date(`${form.departure_date}T${form.departure_time_val}`).toISOString(),
-          trip_type: tripType,
+          departure_km:       depKm,
+          purpose:            purposeLabel,
+          departure_time:     new Date(`${form.departure_date}T${form.departure_time_val}`).toISOString(),
+          trip_type:          tripType,
         }),
       });
       const data = await res.json();
@@ -126,7 +137,7 @@ export default function TripStartForm({ vehicles, driver, lastKmMap, quickLocati
         )}
       </div>
 
-      {/* 날짜/시간 */}
+      {/* 출발 일시 */}
       <div className="space-y-2">
         <label className="text-sm font-semibold">출발 일시 <span className="text-destructive">*</span></label>
         <div className="grid grid-cols-2 gap-2">
@@ -150,70 +161,80 @@ export default function TripStartForm({ vehicles, driver, lastKmMap, quickLocati
         )}
       </div>
 
-      {/* 차량 선택 */}
-      <div className="space-y-2">
-        <label className="text-sm font-semibold">차량 선택 <span className="text-destructive">*</span></label>
-        <div className="grid gap-2">
-          {vehicles.map(v => (
-            <button key={v.id} type="button" onClick={() => handleVehicleSelect(v.id)}
-              className={`flex items-center justify-between rounded-xl border-2 px-4 py-3 text-left transition-colors
-                ${form.vehicle_id === v.id ? "border-primary bg-primary/5 text-primary" : "border-border bg-background"}`}>
-              <div>
-                <p className="font-medium">{v.plate_number}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{v.model}</p>
-              </div>
-              <div className="text-right">
-                {lastKmMap[v.id] !== undefined && (
-                  <p className="text-xs text-muted-foreground">이전 {lastKmMap[v.id].toLocaleString("ko-KR")} km</p>
-                )}
-                {form.vehicle_id === v.id && <span className="text-primary font-bold">✓</span>}
-              </div>
-            </button>
-          ))}
+      {/* ── 차량 / 출발지 / 출발 km — 한줄 그리드 레이아웃 ── */}
+      <div className="rounded-xl border border-border bg-background overflow-hidden divide-y divide-border">
+
+        {/* 차량 선택 */}
+        <div className="flex items-center px-4 py-3 gap-3">
+          <span className="w-[4.5rem] text-sm font-medium text-muted-foreground shrink-0">차량</span>
+          {vehicles.length === 1 ? (
+            <span className="flex-1 text-sm font-semibold">
+              {vehicles[0].plate_number}
+              <span className="ml-1.5 text-xs text-muted-foreground font-normal">{vehicles[0].model}</span>
+            </span>
+          ) : (
+            <select
+              value={form.vehicle_id}
+              onChange={e => handleVehicleSelect(e.target.value)}
+              className="flex-1 bg-transparent text-sm font-medium focus:outline-none cursor-pointer">
+              {vehicles.map(v => (
+                <option key={v.id} value={v.id}>{v.plate_number} ({v.model})</option>
+              ))}
+            </select>
+          )}
         </div>
-      </div>
 
-      {/* 출발지 */}
-      <div className="space-y-2">
-        <label htmlFor="dep_loc" className="text-sm font-semibold">출발지 <span className="text-destructive">*</span></label>
-        <LocationAutocomplete
-          id="dep_loc"
-          value={form.departure_location}
-          onChange={v => set("departure_location", v)}
-          placeholder="출발지를 입력하세요"
-          required
-          className="w-full rounded-xl border border-input bg-background px-4 py-3 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-        />
-        {quickLocations.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {quickLocations.map(loc => (
-              <button key={loc} type="button" onClick={() => set("departure_location", loc)}
-                className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors
-                  ${form.departure_location === loc ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border text-muted-foreground hover:text-foreground"}`}>
-                {loc}
-              </button>
-            ))}
+        {/* 출발지 */}
+        <div className="flex items-start px-4 py-3 gap-3">
+          <span className="w-[4.5rem] text-sm font-medium text-muted-foreground shrink-0 pt-3">출발지</span>
+          <div className="flex-1 space-y-2 min-w-0">
+            <LocationAutocomplete
+              id="dep_loc"
+              value={form.departure_location}
+              onChange={v => set("departure_location", v)}
+              placeholder="출발지를 입력하세요"
+              required
+              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+            {/* 빠른선택 + 최근이력 — 가로 스크롤 한줄 */}
+            {combinedDepLocs.length > 0 && (
+              <div className="flex gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none", msOverflowStyle: "none" } as React.CSSProperties}>
+                {combinedDepLocs.map(loc => (
+                  <button key={loc} type="button" onClick={() => set("departure_location", loc)}
+                    className={`rounded-full px-3 py-1 text-xs font-medium border whitespace-nowrap shrink-0 transition-colors
+                      ${form.departure_location === loc
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background border-border text-muted-foreground hover:text-foreground"}`}>
+                    {loc}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-        )}
-        <RecentLocationButtons
-          onSelect={v => set("departure_location", v)}
-          current={form.departure_location}
-          exclude={quickLocations}
-        />
-      </div>
+        </div>
 
-      {/* 출발 km */}
-      <div className="space-y-2">
-        <label htmlFor="dep_km" className="text-sm font-semibold">출발 계기판 km <span className="text-destructive">*</span></label>
-        <div className="relative">
-          <input id="dep_km" type="number" inputMode="numeric"
-            placeholder={lastKm !== undefined ? `이전 ${lastKm.toLocaleString("ko-KR")}` : "45200"}
-            value={form.departure_km} onChange={e => set("departure_km", e.target.value)} required min="0"
-            className="w-full rounded-xl border border-input bg-background px-4 py-3 pr-14 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50" />
-          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">km</span>
+        {/* 출발 km */}
+        <div className="flex items-center px-4 py-3 gap-3">
+          <span className="w-[4.5rem] text-sm font-medium text-muted-foreground shrink-0">출발 km</span>
+          <div className="relative flex-1">
+            <input
+              id="dep_km" type="number" inputMode="numeric"
+              placeholder={lastKm !== undefined ? `이전 ${lastKm.toLocaleString("ko-KR")}` : "계기판 숫자 입력하세요"}
+              value={form.departure_km}
+              onChange={e => set("departure_km", e.target.value)}
+              required min="0"
+              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 pr-12 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">km</span>
+          </div>
         </div>
         {lastKm !== undefined && (
-          <p className="text-xs text-primary">이전 도착: {lastKm.toLocaleString("ko-KR")} km {form.departure_km === String(lastKm) ? "✓ 자동 입력됨" : ""}</p>
+          <div className="px-4 py-2 bg-primary/5">
+            <p className="text-xs text-primary">
+              이전 도착: {lastKm.toLocaleString("ko-KR")} km
+              {form.departure_km === String(lastKm) ? " ✓ 자동 입력됨" : ""}
+            </p>
+          </div>
         )}
       </div>
 
