@@ -61,7 +61,7 @@ export default async function MobileHomePage() {
   return (
     <div className="p-4 space-y-4 pb-6">
       {/* 진행 중 운행 배너 */}
-      {activeTrip ? (
+      {activeTrip && (
         <Link href={`/trip/${activeTrip.id}/end`}
           className={`block rounded-2xl p-5 shadow-lg ${activeBg} text-white`}>
           <div className="flex items-start justify-between">
@@ -75,15 +75,6 @@ export default async function MobileHomePage() {
           <div className="mt-4 bg-white/15 rounded-xl py-2.5 text-center text-sm font-semibold">
             도착 등록하기 →
           </div>
-        </Link>
-      ) : (
-        <Link href="/trip/start"
-          className="block rounded-2xl border-2 border-dashed border-primary/40 p-6 text-center space-y-2">
-          <div className="w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto">
-            <span className="text-2xl">🚗</span>
-          </div>
-          <p className="font-semibold text-foreground">운행 시작</p>
-          <p className="text-sm text-muted-foreground">탭하여 출발 정보를 등록하세요</p>
         </Link>
       )}
 
@@ -159,6 +150,14 @@ export default async function MobileHomePage() {
         <span className="text-sm font-medium">내 운행 기록 전체 보기</span>
         <span>→</span>
       </Link>
+
+      {/* 운행 시작 버튼 — 진행 중 운행 없을 때만 표시 */}
+      {!activeTrip && (
+        <Link href="/trip/start"
+          className="flex items-center justify-center gap-2 w-full rounded-2xl bg-primary text-primary-foreground py-4 text-base font-semibold shadow-md">
+          🚗 운행 시작
+        </Link>
+      )}
     </div>
   );
 }

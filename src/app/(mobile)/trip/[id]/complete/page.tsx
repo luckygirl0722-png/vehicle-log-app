@@ -70,14 +70,14 @@ export default async function TripCompletePage({ params }: Props) {
             { label: "소요시간", value: durationLabel, unit: "" },
             { label: "통행료",   value: trip.toll_fee > 0 ? trip.toll_fee.toLocaleString("ko-KR") : "없음", unit: trip.toll_fee > 0 ? "원" : "" },
           ].map(({ label, value, unit }) => (
-            <div key={label} className="flex flex-col items-center py-4 px-2">
-              <span className="text-xs text-muted-foreground mb-1">{label}</span>
-              <span className="text-lg font-bold">{value}</span>
+            <div key={label} className="flex flex-col items-center py-2.5 px-2">
+              <span className="text-xs text-muted-foreground mb-0.5">{label}</span>
+              <span className="text-base font-bold">{value}</span>
               {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
             </div>
           ))}
         </div>
-        <div className="p-4 space-y-3 text-sm">
+        <div className="px-3 py-2 space-y-1 text-sm divide-y divide-border/50">
           {([
             ["차량",   `${(trip.vehicles as any)?.plate_number ?? "—"} · ${(trip.vehicles as any)?.model ?? ""}`],
             ["운전자", (trip.drivers as any)?.name ?? "—"],
@@ -89,9 +89,9 @@ export default async function TripCompletePage({ params }: Props) {
             ["도착",   timeFormat(arrTime)],
             ["목적",   trip.purpose],
           ] as [string, string][]).map(([label, value]) => (
-            <div key={label} className="flex justify-between items-start gap-4">
-              <span className="text-muted-foreground shrink-0 w-14">{label}</span>
-              <span className="font-medium text-right">{value}</span>
+            <div key={label} className="flex justify-between items-center gap-4 py-1">
+              <span className="text-muted-foreground shrink-0 w-12 text-xs">{label}</span>
+              <span className="font-medium text-right text-xs">{value}</span>
             </div>
           ))}
         </div>

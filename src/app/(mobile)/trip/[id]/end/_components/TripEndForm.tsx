@@ -390,37 +390,42 @@ export default function TripEndForm({ trip, isEditMode = false }: Props) {
         </div>
       )}
 
-      <button type="submit" disabled={isPending}
-        className={`w-full rounded-xl ${btnColor} text-white py-4 text-base font-semibold disabled:opacity-50`}>
-        {isPending
-          ? "저장 중..."
-          : isEditMode ? "수정 완료" : "운행 완료"}
-      </button>
+      {/* 버튼 한줄 — 취소(신규만) + 완료/수정 */}
+      <div className={`flex gap-3 ${!isEditMode ? "" : ""}`}>
+        {!isEditMode && (
+          <button type="button" onClick={() => setConfirmCancel(true)}
+            className="flex-1 rounded-xl border border-border text-muted-foreground py-4 text-sm font-medium hover:bg-muted transition-colors">
+            🚫 운행 취소
+          </button>
+        )}
+        <button type="submit" disabled={isPending}
+          className={`${isEditMode ? "w-full" : "flex-1"} rounded-xl ${btnColor} text-white py-4 text-base font-semibold disabled:opacity-50`}>
+          {isPending ? "저장 중..." : isEditMode ? "수정 완료" : "운행 완료"}
+        </button>
+      </div>
 
-      {/* 취소 버튼 — 도착 입력 중(신규)에만 표시 */}
-      {!isEditMode && (
-        <div className="mt-1">
-          {!confirmCancel ? (
-            <button type="button" onClick={() => setConfirmCancel(true)}
-              className="w-full rounded-xl border border-border text-muted-foreground py-3 text-sm font-medium hover:bg-muted transition-colors">
-              🚫 운행 취소 (기록 삭제)
-            </button>
-          ) : (
-            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 space-y-3">
-              <p className="text-sm text-center text-destructive font-medium">정말 이 운행 기록을 삭제하시겠어요?</p>
-              <p className="text-xs text-center text-muted-foreground">출발 기록이 삭제되며 복구할 수 없습니다.</p>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setConfirmCancel(false)} disabled={isCancelling}
-                  className="flex-1 rounded-xl border border-border bg-background py-3 text-sm font-medium">
-                  아니오
-                </button>
-                <button type="button" onClick={handleCancel} disabled={isCancelling}
-                  className="flex-1 rounded-xl bg-destructive text-white py-3 text-sm font-bold disabled:opacity-50">
-                  {isCancelling ? "삭제 중..." : "예, 삭제합니다"}
-                </button>
-              </div>
+      {/* 취소 확인 팝업 */}
+      {confirmCancel && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end justify-center p-0"
+          onClick={() => setConfirmCancel(false)}>
+          <div className="bg-background rounded-t-3xl w-full max-w-lg p-6 space-y-4 shadow-xl"
+            onClick={e => e.stopPropagation()}>
+            <div className="w-10 h-1 bg-muted rounded-full mx-auto mb-2" />
+            <div className="text-center space-y-1.5">
+              <p className="text-base font-bold text-destructive">운행을 취소하시겠습니까?</p>
+              <p className="text-sm text-muted-foreground">출발 기록이 삭제되며 복구할 수 없습니다.</p>
             </div>
-          )}
+            <div className="flex gap-3 pt-1">
+              <button type="button" onClick={() => setConfirmCancel(false)} disabled={isCancelling}
+                className="flex-1 rounded-xl border border-border bg-background py-3.5 text-sm font-medium">
+                아니오, 계속 운행
+              </button>
+              <button type="button" onClick={handleCancel} disabled={isCancelling}
+                className="flex-1 rounded-xl bg-destructive text-white py-3.5 text-sm font-bold disabled:opacity-50">
+                {isCancelling ? "삭제 중..." : "예, 취소합니다"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </form>
