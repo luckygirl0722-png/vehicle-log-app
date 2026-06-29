@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Fragment } from "react";
 import TripActionButtons from "../my-trips/_components/TripActionButtons";
 import BulkSubmitSection from "../my-trips/_components/BulkSubmitSection";
+import ExcelUploadSection from "./_components/ExcelUploadSection";
 
 export const metadata = { title: "차량 기록 — 차량 운행일지" };
 
@@ -175,6 +176,14 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
           <span className="text-sm shrink-0">⚠️</span>
           <p className="text-xs text-amber-700">미입력 구간 {gapCount}건이 있습니다. 아래에서 확인하세요.</p>
         </div>
+      )}
+
+      {/* Excel 업로드 (PC 전용 — md: 이상에서만 렌더됨) */}
+      {selectedVehicle && (
+        <ExcelUploadSection
+          vehicleId={selectedVehicleId}
+          vehiclePlate={selectedVehicle.plate_number}
+        />
       )}
 
       {/* 내 미제출 기록 일괄 제출 */}
