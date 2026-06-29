@@ -30,24 +30,27 @@ const VALID_TYPES = ["업무", "출퇴근", "개인사용"];
 
 // 엑셀 날짜 직렬번호 → "YYYY-MM-DD" 변환
 function excelDateToStr(val: unknown): string {
-  if (typeof val === "number") {
-    const date = XLSX.SSF.parse_date_code(val);
-    if (date) {
-      const y = date.y;
-      const m = String(date.m).padStart(2, "0");
-      const d = String(date.d).padStart(2, "0");
-      return `${y}-${m}-${d}`;
-    }
+  if (typeof val === "number" && val > 0) {
+    // 엑셀 날짜 직렬번호: 1900-01-01 = 1, 단 엑셀의 윤년 버그로 60을 뺀 뒤 계산
+    const epoch = (val - 25569) * 86400 * 1000;
+    const d = new Date(epoch);
+    const year  = d.getUTCFullYear();
+    const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const day   = String(d.getUTCDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   }
   if (val instanceof Date) {
-    return val.toISOString().slice(0, 10);
+    const year  = val.getUTCFullYear();
+    const month = String(val.getUTCMonth() + 1).padStart(2, "0");
+    const day   = String(val.getUTCDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   }
   const s = String(val ?? "").trim();
   // "6/1(월)" 또는 "6/1" 형식 처리
-  const m = s.match(/(\d{1,2})\/(\d{1,2})/);
-  if (m) {
+  const matched = s.match(/(\d{1,2})\/(\d{1,2})/);
+  if (matched) {
     const year = new Date().getFullYear();
-    return `${year}-${String(m[1]).padStart(2, "0")}-${String(m[2]).padStart(2, "0")}`;
+    return `${year}-${String(matched[1]).padStart(2, "0")}-${String(matched[2]).padStart(2, "0")}`;
   }
   return s;
 }
