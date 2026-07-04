@@ -57,7 +57,7 @@ export default async function AdminLayout({
         {/* 상단 로고 바 */}
         <div className="sticky top-0 z-30 bg-background border-b border-border flex justify-end items-center px-6 py-2">
           <img
-            src="/samwoo-logo.png"
+            src="/samwoo-logo.svg"
             alt="삼우에레코"
             className="h-8 w-auto object-contain"
           />

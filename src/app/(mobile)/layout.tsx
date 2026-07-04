@@ -38,7 +38,7 @@ export default async function MobileLayout({ children }: { children: React.React
         </div>
         {/* 삼우에레코 로고 */}
         <img
-          src="/samwoo-logo.png"
+          src="/samwoo-logo.svg"
           alt="삼우에레코"
           className="h-7 w-auto object-contain bg-white rounded px-1.5 py-0.5"
         />
