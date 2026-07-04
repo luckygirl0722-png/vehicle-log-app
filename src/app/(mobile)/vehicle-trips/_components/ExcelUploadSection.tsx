@@ -3,23 +3,19 @@
 /**
  * 국세청 업무용 승용차 운행기록부 양식 파서
  *
- * 컬럼 매핑 (1-based):
- *   C(3)  : 번호
- *   D(4)  : 날짜
- *   E(5)  : 부서
- *   G(7)  : 성명
- *   I(9)  : ⑤ 출발km (주행 전 계기판)
- *   K(11) : ⑥ 도착km (주행 후 계기판)
- *   M(13) : ⑦ 주행거리 (수식, 무시)
- *   O(15) : ⑧ 출퇴근용 km
- *   Q(17) : ⑨ 일반업무용 km
- *   S(19) : 개인사용 km
- *   U(21) : 하이패스 통행료
- *   V(22) : 기타 통행료
- *   W(23) : ⑩ 비고
+ * 컬럼 인덱스 (0-based, sheet_to_json header:1 기준):
+ *   idx 3  (D) : 날짜
+ *   idx 8  (I) : ⑤ 출발km (주행 전 계기판)
+ *   idx 10 (K) : ⑥ 도착km (주행 후 계기판)
+ *   idx 14 (O) : ⑧ 출퇴근용 km
+ *   idx 16 (Q) : ⑨ 일반업무용 km
+ *   idx 18 (S) : 개인사용 km
+ *   idx 20 (U) : 하이패스 통행료
+ *   idx 21 (V) : 기타 통행료
+ *   idx 22 (W) : 비고
  *
+ * 데이터 행: index 12~42 (1-based row 13~43, 31일분)
  * 운행유형 파생: O>0→출퇴근 / Q>0→업무 / S>0→개인사용 / 기본→업무
- * 출발시간/도착시간: 없으므로 API에서 09:00/18:00 기본값 사용
  */
 
 import { useState, useRef } from "react";
@@ -43,8 +39,6 @@ interface Props {
   vehiclePlate: string;
 }
 
-const VALID_TYPES = ["업무", "출퇴근", "개인사용"];
-
 /** 엑셀 날짜 직렬번호 또는 Date → "YYYY-MM-DD" */
 function toDateStr(val: unknown): string {
   if (typeof val === "number" && val > 0) {
@@ -52,7 +46,7 @@ function toDateStr(val: unknown): string {
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}`;
   }
   if (val instanceof Date) {
-    return `${val.getUTCFullYear()}-${String(val.getUTCMonth()+1).padStart(2,"0")}-${String(val.getUTCDate()).padStart(2,"0")}`;
+    return `${val.getFullYear()}-${String(val.getMonth()+1).padStart(2,"0")}-${String(val.getDate()).padStart(2,"0")}`;
   }
   const s = String(val ?? "").trim();
   const m = s.match(/(\d{4})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/);
@@ -61,6 +55,7 @@ function toDateStr(val: unknown): string {
 }
 
 function toNum(val: unknown): number {
+  if (val === null || val === undefined || val === "") return 0;
   const n = Number(val);
   return isNaN(n) ? 0 : n;
 }
@@ -69,73 +64,93 @@ export default function ExcelUploadSection({ vehicleId, vehiclePlate }: Props) {
   const router  = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [step, setStep]         = useState<"idle"|"preview"|"done">("idle");
-  const [rows, setRows]         = useState<ParsedRow[]>([]);
-  const [fileName, setFileName] = useState("");
-  const [loading, setLoading]   = useState(false);
-  const [result, setResult]     = useState<string|null>(null);
-  const [apiError, setApiError] = useState<string|null>(null);
+  const [step, setStep]           = useState<"idle"|"preview"|"done">("idle");
+  const [rows, setRows]           = useState<ParsedRow[]>([]);
+  const [fileName, setFileName]   = useState("");
+  const [loading, setLoading]     = useState(false);
+  const [result, setResult]       = useState<string|null>(null);
+  const [apiError, setApiError]   = useState<string|null>(null);
+  const [debugInfo, setDebugInfo] = useState<string>("");
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setFileName(file.name);
     setApiError(null);
+    setDebugInfo("");
 
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        const wb = XLSX.read(ev.target?.result, { type: "array", cellDates: false });
+        const wb = XLSX.read(ev.target?.result, { type: "array", cellDates: false, cellNF: false });
         const ws = wb.Sheets[wb.SheetNames[0]];
+
+        // sheet_to_json 방식 (formula 캐시 없는 파일도 대응)
+        const aoa: unknown[][] = XLSX.utils.sheet_to_json(ws, {
+          header:  1,
+          raw:     true,
+          defval:  null,
+          blankrows: true,
+        }) as unknown[][];
+
         const parsed: ParsedRow[] = [];
+        let skipped = 0;
 
-        // 국세청 양식: 데이터 행 13~43 (0-based row 12~42)
-        for (let r = 12; r <= 42; r++) {
-          const get = (c: number) => ws[XLSX.utils.encode_cell({ r, c })]?.v;
+        // 데이터 행: index 12~42 (row 13~43)
+        for (let i = 12; i <= 42; i++) {
+          const row = aoa[i];
+          if (!row) { skipped++; continue; }
 
-          // 1-based col → 0-based: D=3, E=4, G=6, I=8, K=10, O=14, Q=16, S=18, U=20, V=21, W=22
-          const dateVal  = get(3);   // D: 날짜
-          const depKm    = toNum(get(8));   // I: 출발km
-          const arrKm    = toNum(get(10));  // K: 도착km
-          const comKm    = toNum(get(14));  // O: 출퇴근용
-          const bizKm    = toNum(get(16));  // Q: 업무용
-          const perKm    = toNum(get(18));  // S: 개인사용
-          const tollHp   = toNum(get(20));  // U: 하이패스
-          const tollEtc  = toNum(get(21));  // V: 기타
-          const noteVal  = String(get(22) ?? "").trim(); // W: 비고
+          const dateVal = row[3];   // D
+          const depKm   = toNum(row[8]);   // I
+          const arrKm   = toNum(row[10]);  // K
+          const comKm   = toNum(row[14]);  // O
+          const bizKm   = toNum(row[16]);  // Q
+          const perKm   = toNum(row[18]);  // S
+          const tollHp  = toNum(row[20]);  // U
+          const tollEtc = toNum(row[21]);  // V
+          const noteVal = String(row[22] ?? "").trim();
 
-          // 빈 행 건너뜀 (출발km·도착km 모두 0이면)
-          if (!depKm && !arrKm) continue;
-          if (!dateVal) continue;
+          // km 모두 0이면 운행 없는 날 — 건너뜀
+          if (!depKm && !arrKm) { skipped++; continue; }
+          if (!dateVal) { skipped++; continue; }
 
           // 운행유형 파생
           let trip_type = "업무";
-          if (comKm > 0) trip_type = "출퇴근";
+          if (comKm > 0)      trip_type = "출퇴근";
           else if (perKm > 0) trip_type = "개인사용";
           else if (bizKm > 0) trip_type = "업무";
 
           const dateStr = toDateStr(dateVal);
           const errors: string[] = [];
           if (!dateStr || dateStr.length < 8) errors.push("날짜 오류");
-          if (arrKm <= depKm) errors.push("도착km ≤ 출발km");
+          if (arrKm <= depKm)                  errors.push("도착km ≤ 출발km");
 
           parsed.push({
-            rowNum:    r - 11,   // 1-based
-            date:      dateStr,
-            dep_km:    depKm,
-            arr_km:    arrKm,
-            distance:  arrKm - depKm,
+            rowNum:   i - 11,
+            date:     dateStr,
+            dep_km:   depKm,
+            arr_km:   arrKm,
+            distance: arrKm - depKm,
             trip_type,
-            toll_fee:  tollHp + tollEtc,
-            note:      noteVal,
-            error:     errors.length ? errors.join(", ") : undefined,
+            toll_fee: tollHp + tollEtc,
+            note:     noteVal,
+            error:    errors.length ? errors.join(", ") : undefined,
           });
+        }
+
+        // 디버그 정보 (0건인 경우 원인 파악용)
+        if (parsed.length === 0) {
+          const sample = aoa[12];
+          setDebugInfo(
+            `행 수: ${aoa.length} / 샘플(13행): D=${sample?.[3]} I=${sample?.[8]} K=${sample?.[10]}`
+          );
         }
 
         setRows(parsed);
         setStep("preview");
-      } catch {
-        setApiError("파일을 읽을 수 없습니다. 국세청 운행기록부 양식(.xlsx)인지 확인하세요.");
+      } catch (err: unknown) {
+        setApiError(`파일 파싱 오류: ${err instanceof Error ? err.message : String(err)}`);
       }
     };
     reader.readAsArrayBuffer(file);
@@ -149,10 +164,9 @@ export default function ExcelUploadSection({ vehicleId, vehiclePlate }: Props) {
     setLoading(true);
     setApiError(null);
 
-    // departure_location/arrival_location 없음 → API에서 "미입력" 처리
     const payload = validRows.map(r => ({
-      departure_time: r.date,   // API에서 "YYYY-MM-DD" → 09:00 보정
-      arrival_time:   r.date,   // API에서 "YYYY-MM-DD" → 18:00 보정
+      departure_time: r.date,
+      arrival_time:   r.date,
       departure_km:   r.dep_km,
       arrival_km:     r.arr_km,
       toll_fee:       r.toll_fee,
@@ -161,31 +175,30 @@ export default function ExcelUploadSection({ vehicleId, vehiclePlate }: Props) {
     }));
 
     const res = await fetch("/api/trips/bulk", {
-      method: "POST",
+      method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ vehicle_id: vehicleId, rows: payload }),
+      body:    JSON.stringify({ vehicle_id: vehicleId, rows: payload }),
     });
     const data = await res.json();
     setLoading(false);
 
     if (!res.ok) {
-      const detail = data.details?.join("\n") ?? data.error ?? "업로드 실패";
-      setApiError(detail);
+      setApiError(data.details?.join("\n") ?? data.error ?? "업로드 실패");
       return;
     }
 
-    setResult(`${data.inserted}건 등록 완료 (승인 대기 상태)`);
+    setResult(`${data.inserted}건 등록 완료 (승인 대기)`);
     setStep("done");
-    setTimeout(() => { router.refresh(); }, 1500);
+    setTimeout(() => router.refresh(), 1500);
   }
 
   function handleReset() {
     setStep("idle"); setRows([]); setFileName("");
-    setResult(null); setApiError(null);
+    setResult(null); setApiError(null); setDebugInfo("");
     if (fileRef.current) fileRef.current.value = "";
   }
 
-  const TYPE_COLOR: Record<string,string> = {
+  const TYPE_COLOR: Record<string, string> = {
     "업무":     "bg-blue-100 text-blue-700",
     "출퇴근":   "bg-emerald-100 text-emerald-700",
     "개인사용": "bg-orange-100 text-orange-700",
@@ -216,7 +229,7 @@ export default function ExcelUploadSection({ vehicleId, vehiclePlate }: Props) {
             <div>
               <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-border rounded-xl cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors">
                 <p className="text-sm font-medium">📂 운행기록부 Excel 파일 선택</p>
-                <p className="text-xs text-muted-foreground mt-1">.xlsx 파일 · 국세청 양식</p>
+                <p className="text-xs text-muted-foreground mt-1">.xlsx · 국세청 업무용 승용차 운행기록부</p>
                 <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={handleFile} />
               </label>
               {apiError && <p className="mt-2 text-xs text-destructive">{apiError}</p>}
@@ -230,8 +243,10 @@ export default function ExcelUploadSection({ vehicleId, vehiclePlate }: Props) {
                 <div>
                   <p className="text-sm font-semibold">📄 {fileName}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    파싱 결과 · <span className="text-emerald-600 font-medium">정상 {validRows.length}건</span>
-                    {invalidRows.length > 0 && <span className="text-destructive font-medium"> · 오류 {invalidRows.length}건 제외</span>}
+                    파싱 결과 ·{" "}
+                    <span className="text-emerald-600 font-medium">정상 {validRows.length}건</span>
+                    {invalidRows.length > 0 &&
+                      <span className="text-amber-600 font-medium"> · 오류(제외) {invalidRows.length}건</span>}
                   </p>
                 </div>
                 <button onClick={handleReset}
@@ -240,24 +255,49 @@ export default function ExcelUploadSection({ vehicleId, vehiclePlate }: Props) {
                 </button>
               </div>
 
-              {/* 안내 */}
-              <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-2.5 text-xs text-blue-700 space-y-0.5">
-                <p className="font-semibold">ℹ️ 국세청 양식 업로드 안내</p>
-                <p>출발지·도착지·시간은 양식에 없으므로 <span className="font-semibold">"미입력"</span>으로 저장됩니다. 필요 시 앱에서 수정하세요.</p>
-                <p>운행유형은 출퇴근용(⑧)·업무용(⑨)·개인사용 열의 값으로 자동 판별합니다.</p>
-              </div>
-
-              {invalidRows.length > 0 && (
-                <div className="rounded-xl bg-destructive/5 border border-destructive/20 px-4 py-3 space-y-1">
-                  <p className="text-xs font-semibold text-destructive">⚠️ 오류 행 (제외됨)</p>
-                  {invalidRows.map(r => (
-                    <p key={r.rowNum} className="text-xs text-destructive">
-                      {r.date} — {r.error}
+              {/* 데이터 없음 */}
+              {rows.length === 0 && (
+                <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 space-y-1">
+                  <p className="text-sm font-semibold text-amber-700">⚠️ 파싱된 데이터가 없습니다</p>
+                  <p className="text-xs text-amber-700">가능한 원인:</p>
+                  <ul className="text-xs text-amber-700 list-disc list-inside space-y-0.5">
+                    <li>국세청 양식에 운행 데이터(출발km·도착km)를 아직 입력하지 않았습니다</li>
+                    <li>파일이 국세청 업무용 승용차 운행기록부 서식이 아닙니다</li>
+                    <li>저장 시 수식 결과값이 포함되지 않았습니다 (다른 이름으로 저장 후 재시도)</li>
+                  </ul>
+                  {debugInfo && (
+                    <p className="text-xs text-amber-600 mt-1 font-mono bg-amber-100 px-2 py-1 rounded">
+                      진단: {debugInfo}
                     </p>
-                  ))}
+                  )}
                 </div>
               )}
 
+              {/* 안내 (데이터 있을 때만) */}
+              {rows.length > 0 && (
+                <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-2.5 text-xs text-blue-700 space-y-0.5">
+                  <p className="font-semibold">ℹ️ 국세청 양식 업로드 안내</p>
+                  <p>출발지·도착지·시간은 양식에 없으므로 <span className="font-semibold">"미입력"</span>으로 저장됩니다.</p>
+                  <p>운행유형은 ⑧출퇴근·⑨업무·개인사용 열의 값으로 자동 판별합니다.</p>
+                </div>
+              )}
+
+              {/* 오류 행 */}
+              {invalidRows.length > 0 && (
+                <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 space-y-1">
+                  <p className="text-xs font-semibold text-amber-700">⚠️ 제외된 행 (운행 없는 날 또는 오류)</p>
+                  {invalidRows.slice(0,5).map(r => (
+                    <p key={r.rowNum} className="text-xs text-amber-700">
+                      {r.date} — {r.error}
+                    </p>
+                  ))}
+                  {invalidRows.length > 5 && (
+                    <p className="text-xs text-amber-600">외 {invalidRows.length - 5}건</p>
+                  )}
+                </div>
+              )}
+
+              {/* 미리보기 테이블 */}
               {validRows.length > 0 && (
                 <div className="overflow-x-auto rounded-xl border border-border">
                   <table className="w-full text-xs">
@@ -324,6 +364,7 @@ export default function ExcelUploadSection({ vehicleId, vehiclePlate }: Props) {
               </button>
             </div>
           )}
+
         </div>
       </div>
     </div>
