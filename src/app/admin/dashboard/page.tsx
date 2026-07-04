@@ -8,11 +8,14 @@ import RecentTrips from "./_components/RecentTrips";
 import RealtimeSubscriber from "./_components/RealtimeSubscriber";
 import VehicleMonthlyStats from "./_components/VehicleMonthlyStats";
 import DriverMonthlyStats from "./_components/DriverMonthlyStats";
+import MonthNavBar from "./_components/MonthNavBar";
 
 export const metadata = { title: "대시보드 - 차량 운행일지" };
 export const dynamic = "force-dynamic";
 
-export default async function AdminDashboardPage() {
+type Props = { searchParams: { stats_month?: string } };
+
+export default async function AdminDashboardPage({ searchParams }: Props) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -22,6 +25,20 @@ export default async function AdminDashboardPage() {
   if (roleRow?.role !== "admin") redirect("/");
 
   const now = new Date();
+
+  // ── 집계용 선택 월 (stats_month=YYYY-MM, 기본=이번 달) ──
+  const statsDate = searchParams.stats_month
+    ? new Date(searchParams.stats_month + "-01")
+    : new Date(now.getFullYear(), now.getMonth(), 1);
+  const statsMonthStart = new Date(statsDate.getFullYear(), statsDate.getMonth(),     1).toISOString();
+  const statsMonthEnd   = new Date(statsDate.getFullYear(), statsDate.getMonth() + 1, 1).toISOString();
+  const statsMonthLabel = statsDate.toLocaleDateString("ko-KR", { year: "numeric", month: "long" });
+  const statsMonthParam = `${statsDate.getFullYear()}-${String(statsDate.getMonth()+1).padStart(2,"0")}`;
+  const prevStatsDate   = new Date(statsDate.getFullYear(), statsDate.getMonth() - 1, 1);
+  const nextStatsDate   = new Date(statsDate.getFullYear(), statsDate.getMonth() + 1, 1);
+  const prevStatsParam  = `${prevStatsDate.getFullYear()}-${String(prevStatsDate.getMonth()+1).padStart(2,"0")}`;
+  const nextStatsParam  = `${nextStatsDate.getFullYear()}-${String(nextStatsDate.getMonth()+1).padStart(2,"0")}`;
+
   const curMonthStart  = new Date(now.getFullYear(), now.getMonth(),     1).toISOString();
   const curMonthEnd    = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
   const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
@@ -50,15 +67,15 @@ export default async function AdminDashboardPage() {
       .select("id, status, departure_time, departure_location, arrival_location, distance_km, vehicles(plate_number), drivers(name)")
       .order("departure_time", { ascending: false }).limit(5),
     supabase.from("vehicles").select("id, plate_number, model").eq("is_active", true).order("plate_number"),
-    // 차량별 업무/출퇴근 집계용
+    // 차량별 업무/출퇴근 집계용 (선택 월)
     supabase.from("trip_logs")
       .select("vehicle_id, distance_km, toll_fee, trip_type")
-      .gte("departure_time", curMonthStart).lt("departure_time", curMonthEnd)
+      .gte("departure_time", statsMonthStart).lt("departure_time", statsMonthEnd)
       .not("arrival_time", "is", null),
-    // 운전자별 집계용
+    // 운전자별 집계용 (선택 월)
     supabase.from("trip_logs")
       .select("driver_id, vehicle_id, distance_km, toll_fee, trip_type, drivers(name), vehicles(plate_number, model)")
-      .gte("departure_time", curMonthStart).lt("departure_time", curMonthEnd)
+      .gte("departure_time", statsMonthStart).lt("departure_time", statsMonthEnd)
       .not("arrival_time", "is", null),
   ]);
 
@@ -180,32 +197,52 @@ export default async function AdminDashboardPage() {
         </div>
       </div>
 
-      {/* ★ 차량별 월별 집계 (업무/출퇴근 분리) */}
-      <div className="rounded-xl border bg-background p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold">{monthLabel} 차량별 운행 집계</h2>
-          <div className="flex gap-3 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-primary inline-block" />업무</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" />출퇴근</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-orange-500 inline-block" />개인사용</span>
+      {/* ★ 차량별 · 운전자별 월별 집계 — 공통 월 선택 바 */}
+      <div className="rounded-xl border bg-background overflow-hidden">
+        <MonthNavBar
+          statsMonthLabel={statsMonthLabel}
+          statsMonthParam={statsMonthParam}
+          prevStatsParam={prevStatsParam}
+          nextStatsParam={nextStatsParam}
+          options={Array.from({ length: 15 }, (_, i) => {
+            const d = new Date(now.getFullYear(), now.getMonth() + 3 - i, 1);
+            return {
+              value: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`,
+              label: d.toLocaleDateString("ko-KR", { year: "numeric", month: "long" }),
+            };
+          })}
+        />
+
+        <div className="p-5 space-y-8">
+          {/* 차량별 집계 */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold">{statsMonthLabel} 차량별 운행 집계</h2>
+              <div className="flex gap-3 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-primary inline-block" />업무</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" />출퇴근</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-orange-500 inline-block" />개인사용</span>
+              </div>
+            </div>
+            <VehicleMonthlyStats rows={vehicleStatsRows} monthLabel={statsMonthLabel} year={statsDate.getFullYear()} month={statsDate.getMonth()+1} />
+          </div>
+
+          <div className="border-t border-border" />
+
+          {/* 운전자별 집계 */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold">{statsMonthLabel} 운전자별 운행 집계</h2>
+              <div className="flex gap-3 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-primary inline-block" />업무</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" />출퇴근</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-orange-500 inline-block" />개인사용</span>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">▶ 복수 차량 사용 운전자는 클릭하면 차량별 세부 내역을 볼 수 있습니다.</p>
+            <DriverMonthlyStats rows={driverStatsRows} year={statsDate.getFullYear()} month={statsDate.getMonth()+1} />
           </div>
         </div>
-        <VehicleMonthlyStats rows={vehicleStatsRows} monthLabel={monthLabel} year={now.getFullYear()} month={now.getMonth()+1} />
-      </div>
-
-
-      {/* ★ 운전자별 월별 집계 */}
-      <div className="rounded-xl border bg-background p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold">{monthLabel} 운전자별 운행 집계</h2>
-          <div className="flex gap-3 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-primary inline-block" />업무</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" />출퇴근</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-orange-500 inline-block" />개인사용</span>
-          </div>
-        </div>
-        <p className="text-xs text-muted-foreground mb-3">▶ 복수 차량 사용 운전자는 클릭하면 차량별 세부 내역을 볼 수 있습니다.</p>
-        <DriverMonthlyStats rows={driverStatsRows} year={now.getFullYear()} month={now.getMonth()+1} />
       </div>
 
       {/* 최근 운행 */}
