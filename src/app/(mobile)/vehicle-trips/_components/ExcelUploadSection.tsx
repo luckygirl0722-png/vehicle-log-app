@@ -4,17 +4,23 @@ import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 
 /**
- * 국세청 업무용 승용차 운행기록부 (도착지 추가 버전) 컬럼 매핑 (0-based)
- * D(3)=날짜  I(8)=도착지  J(9)=출발km  L(11)=도착km
- * P(15)=출퇴근용  R(17)=일반업무용  T(19)=개인사용
- * V(21)=하이패스  W(22)=기타
+ * 국세청 업무용 승용차 운행기록부 양식 자동 감지 파서
+ *
+ * [구 양식] I11 = "⑤ 주행 전 계기판의 거리(km)"
+ *   D(3)=날짜  I(8)=출발km  K(10)=도착km
+ *   O(14)=출퇴근  Q(16)=업무  S(18)=개인  U(20)=하이패스  V(21)=기타
+ *
+ * [신 양식] I11 = "도착지" (도착지 컬럼 추가 버전)
+ *   D(3)=날짜  I(8)=도착지  J(9)=출발km  L(11)=도착km
+ *   P(15)=출퇴근  R(17)=업무  T(19)=개인  V(21)=하이패스  W(22)=기타
+ *
  * 데이터 행: index 12~42 (엑셀 행 13~43)
  */
 
 interface ParsedRow {
   rowNum:    number;
   date:      string;
-  arr_loc:   string;   // 도착지
+  arr_loc:   string;
   dep_km:    number;
   arr_km:    number;
   distance:  number;
@@ -39,7 +45,8 @@ function toDateStr(val: unknown): string {
 }
 function toNum(val: unknown): number {
   if (val === null || val === undefined || val === "") return 0;
-  const n = Number(val); return isNaN(n) ? 0 : n;
+  const n = Number(val);
+  return isNaN(n) ? 0 : n;
 }
 
 const TYPE_COLOR: Record<string, string> = {
@@ -58,6 +65,7 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
   const [result, setResult]       = useState<string|null>(null);
   const [apiError, setApiError]   = useState<string|null>(null);
   const [debugInfo, setDebugInfo] = useState("");
+  const [formatLabel, setFormatLabel] = useState("");
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -65,6 +73,7 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
     setFileName(file.name);
     setApiError(null);
     setDebugInfo("");
+    setFormatLabel("");
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
@@ -74,27 +83,53 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
           header: 1, raw: true, defval: null, blankrows: true,
         }) as unknown[][];
 
+        // ── 양식 자동 감지 ──
+        // I11(row10, idx8) 헤더로 구분: "도착지" → 신 양식, "주행 전" → 구 양식
+        const headerRow10 = aoa[10] as unknown[];
+        const i11Header   = String(headerRow10?.[8] ?? "").trim();
+        const isNewFormat = i11Header === "도착지" || i11Header.includes("도착");
+        setFormatLabel(isNewFormat ? "신 양식 (도착지 포함)" : "구 양식 (국세청 원본)");
+
         const parsed: ParsedRow[] = [];
         for (let i = 12; i <= 42; i++) {
           const row = aoa[i];
           if (!row) continue;
 
-          // ── 컬럼 읽기 ──
-          const dateVal = row[3];                          // D  날짜
-          const arrLoc  = String(row[8] ?? "").trim();     // I  도착지
-          const depKm   = toNum(row[9]);                   // J  출발km
-          const arrKm   = toNum(row[11]);                  // L  도착km
-          const comKm   = toNum(row[15]);                  // P  출퇴근용
-          const bizKm   = toNum(row[17]);                  // R  일반업무용
-          const perKm   = toNum(row[19]);                  // T  개인사용
-          const tollHp  = toNum(row[21]);                  // V  하이패스
-          const tollEtc = toNum(row[22]);                  // W  기타
+          const dateVal = row[3]; // D열 (공통)
+          let arrLoc: string;
+          let depKm:  number;
+          let arrKm:  number;
+          let comKm:  number;
+          let bizKm:  number;
+          let perKm:  number;
+          let tollHp: number;
+          let tollEtc:number;
 
-          // 출발·도착km 없으면 빈 행 스킵
+          if (isNewFormat) {
+            // 신 양식: I=도착지 J=출발km L=도착km P=출퇴근 R=업무 T=개인 V=하이패스 W=기타
+            arrLoc  = String(row[8]  ?? "").trim();
+            depKm   = toNum(row[9]);   // J
+            arrKm   = toNum(row[11]);  // L
+            comKm   = toNum(row[15]); // P
+            bizKm   = toNum(row[17]); // R
+            perKm   = toNum(row[19]); // T
+            tollHp  = toNum(row[21]); // V
+            tollEtc = toNum(row[22]); // W
+          } else {
+            // 구 양식: I=출발km K=도착km O=출퇴근 Q=업무 S=개인 U=하이패스 V=기타
+            arrLoc  = "";
+            depKm   = toNum(row[8]);   // I
+            arrKm   = toNum(row[10]);  // K
+            comKm   = toNum(row[14]); // O
+            bizKm   = toNum(row[16]); // Q
+            perKm   = toNum(row[18]); // S
+            tollHp  = toNum(row[20]); // U
+            tollEtc = toNum(row[21]); // V
+          }
+
           if (!depKm && !arrKm) continue;
-          if (!dateVal) continue;
+          if (!dateVal)         continue;
 
-          // 운행유형 판별
           let trip_type = "업무";
           if (comKm > 0)       trip_type = "출퇴근";
           else if (perKm > 0)  trip_type = "개인사용";
@@ -119,8 +154,10 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
         }
 
         if (parsed.length === 0) {
-          const s = aoa[12];
-          setDebugInfo(`총행수:${aoa.length} / 13행샘플: D=${s?.[3]} I=${s?.[8]} J=${s?.[9]} L=${s?.[11]}`);
+          const s = aoa[12] as unknown[];
+          const fmt = isNewFormat ? "신양식" : "구양식";
+          const kmIdx = isNewFormat ? `J(9)=${s?.[9]}` : `I(8)=${s?.[8]}`;
+          setDebugInfo(`${fmt} / 총행수:${aoa.length} / 13행: D=${s?.[3]} ${kmIdx}`);
         }
         setRows(parsed);
         setStep("preview");
@@ -133,19 +170,20 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
 
   const validRows   = rows.filter(r => !r.error);
   const invalidRows = rows.filter(r =>  r.error);
+  const hasArrLoc   = validRows.some(r => r.arr_loc);
 
   async function handleUpload() {
     if (!validRows.length) return;
     setLoading(true);
     setApiError(null);
     const payload = validRows.map(r => ({
-      departure_time:    r.date,
-      arrival_time:      r.date,
-      arrival_location:  r.arr_loc || undefined,   // 도착지
-      departure_km:      r.dep_km,
-      arrival_km:        r.arr_km,
-      toll_fee:          r.toll_fee,
-      trip_type:         r.trip_type,
+      departure_time:   r.date,
+      arrival_time:     r.date,
+      ...(r.arr_loc ? { arrival_location: r.arr_loc } : {}),
+      departure_km:     r.dep_km,
+      arrival_km:       r.arr_km,
+      toll_fee:         r.toll_fee,
+      trip_type:        r.trip_type,
     }));
     const res  = await fetch("/api/trips/bulk", {
       method: "POST",
@@ -165,7 +203,7 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
 
   function handleReset() {
     setStep("idle"); setRows([]); setFileName("");
-    setResult(null); setApiError(null); setDebugInfo("");
+    setResult(null); setApiError(null); setDebugInfo(""); setFormatLabel("");
     if (fileRef.current) fileRef.current.value = "";
   }
 
@@ -195,7 +233,7 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
             <div>
               <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-border rounded-xl cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors">
                 <p className="text-sm font-medium">📂 운행기록부 Excel 파일 선택</p>
-                <p className="text-xs text-muted-foreground mt-1">.xlsx · 국세청 업무용 승용차 운행기록부</p>
+                <p className="text-xs text-muted-foreground mt-1">.xlsx · 국세청 업무용 승용차 운행기록부 (구/신 양식 모두 지원)</p>
                 <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={handleFile} />
               </label>
               {apiError && <p className="mt-2 text-xs text-destructive">{apiError}</p>}
@@ -209,7 +247,8 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
                 <div>
                   <p className="text-sm font-semibold">📄 {fileName}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    파싱 결과 · <span className="text-emerald-600 font-medium">정상 {validRows.length}건</span>
+                    {formatLabel && <span className="text-primary/70 font-medium">[{formatLabel}]</span>}
+                    {" "}파싱 결과 · <span className="text-emerald-600 font-medium">정상 {validRows.length}건</span>
                     {invalidRows.length > 0 && (
                       <span className="text-amber-600 font-medium"> · 제외 {invalidRows.length}건</span>
                     )}
@@ -228,8 +267,8 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
                 <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 space-y-1.5">
                   <p className="text-sm font-semibold text-amber-700">⚠️ 파싱된 데이터가 없습니다</p>
                   <p className="text-xs text-amber-700">• 양식에 출발km·도착km을 아직 입력하지 않은 경우</p>
-                  <p className="text-xs text-amber-700">• 국세청 운행기록부 서식이 아닌 경우</p>
                   <p className="text-xs text-amber-700">• 수식 결과값 없이 저장된 경우 → 엑셀에서 다른 이름으로 저장 후 재시도</p>
+                  <p className="text-xs text-amber-700">• 지원 양식: 국세청 업무용 승용차 운행기록부 (구/신 모두 가능)</p>
                   {debugInfo && (
                     <p className="text-xs font-mono bg-amber-100 text-amber-600 px-2 py-1 rounded mt-1">
                       진단: {debugInfo}
@@ -241,9 +280,9 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
               {/* 정상 데이터 안내 */}
               {rows.length > 0 && (
                 <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-2.5 text-xs text-blue-700 space-y-0.5">
-                  <p className="font-semibold">ℹ️ 국세청 양식 업로드 안내</p>
-                  <p>출발지·시간은 <span className="font-semibold">"미입력"</span>으로 저장됩니다. 도착지는 입력된 값을 사용합니다.</p>
-                  <p>운행유형은 출퇴근용(⑧)·업무용(⑨)·개인사용 열의 값으로 자동 판별합니다.</p>
+                  <p className="font-semibold">ℹ️ 업로드 안내</p>
+                  <p>출발지·시간은 <span className="font-semibold">"미입력"</span>으로 저장됩니다. 필요 시 앱에서 수정하세요.</p>
+                  {hasArrLoc && <p>도착지는 양식에 입력된 값이 함께 저장됩니다.</p>}
                 </div>
               )}
 
@@ -266,18 +305,24 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="bg-muted">
-                        {["날짜", "도착지", "출발km", "도착km", "운행km", "유형", "통행료"].map(h => (
-                          <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-                        ))}
+                        <th className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">날짜</th>
+                        {hasArrLoc && <th className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">도착지</th>}
+                        <th className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">출발km</th>
+                        <th className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">도착km</th>
+                        <th className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">운행km</th>
+                        <th className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">유형</th>
+                        <th className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">통행료</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
                       {validRows.map(r => (
                         <tr key={r.rowNum} className="hover:bg-muted/30">
                           <td className="px-3 py-2 whitespace-nowrap">{r.date}</td>
-                          <td className="px-3 py-2 max-w-28 truncate text-muted-foreground">
-                            {r.arr_loc || <span className="text-muted-foreground/50">미입력</span>}
-                          </td>
+                          {hasArrLoc && (
+                            <td className="px-3 py-2 max-w-28 truncate text-muted-foreground">
+                              {r.arr_loc || <span className="opacity-40">미입력</span>}
+                            </td>
+                          )}
                           <td className="px-3 py-2 whitespace-nowrap text-right">{r.dep_km.toLocaleString("ko-KR")}</td>
                           <td className="px-3 py-2 whitespace-nowrap text-right">{r.arr_km.toLocaleString("ko-KR")}</td>
                           <td className="px-3 py-2 whitespace-nowrap text-right font-semibold text-primary">{r.distance.toLocaleString("ko-KR")}</td>
