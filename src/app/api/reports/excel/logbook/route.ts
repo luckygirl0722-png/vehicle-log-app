@@ -140,17 +140,21 @@ export async function GET(request: NextRequest) {
   ws["F7"] = { v: vehicle.plate_number,            t: "s" };
 
   // ── D열 날짜 직접 입력 ────────────────────────────────────
-  // D13 = =E3, D14 = =D13+1 ... 수식의 캐시된 값이 구 날짜를 유지하는 문제 방지.
-  // Protected View / 자동계산 비활성화 환경에서도 올바른 날짜가 표시되도록
-  // 수식 대신 직접 날짜 시리얼을 기재한다.
+  // 원본 D13=`=E3`, D14=`=D13+1`... 수식의 캐시값(=구 날짜)이 Protected View에서
+  // 재계산되지 않는 문제를 방지하기 위해 수식을 직접 값으로 대체.
+  //
+  // 해당 월보다 긴 행(예: 6월인데 d=31)은 원본 수식 =D42+1 이 다음 달 날짜를
+  // 표시하지 않도록 명시적으로 빈 문자열로 덮어쓴다 (delete 대신).
   const dateFmt = (ws["D13"]?.z as string | undefined) ?? "mm-dd-aaa";
   for (let d = 1; d <= 31; d++) {
     const r = 12 + d;
     if (d <= lastDay) {
       ws[`D${r}`] = { v: toExcelSerial(y, mo, d), t: "n", z: dateFmt };
     } else {
-      // 해당 월에 없는 날짜 행은 빈 셀로 초기화
-      delete ws[`D${r}`];
+      // 공식 =D42+1 이 다음 달 날짜(예: 07-01)를 표시하지 않도록 명시적 초기화
+      ws[`D${r}`] = { v: "", t: "s" };
+      // 거리 공식 =L-J 도 0이 아닌 빈 셀로 초기화
+      ws[`N${r}`] = { v: "", t: "s" };
     }
   }
 
