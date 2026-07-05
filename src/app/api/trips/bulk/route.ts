@@ -42,6 +42,29 @@ export async function POST(req: NextRequest) {
     .maybeSingle();
   if (!assigned) return NextResponse.json({ error: "배정되지 않은 차량입니다." }, { status: 403 });
 
+  // ── 마감된 월 체크 ──
+  const adminClient = createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+  const uniqueYearMonths = [...new Set(
+    rows.map(r => r.departure_time.substring(0, 7)) // "YYYY-MM"
+  )];
+  for (const ym of uniqueYearMonths) {
+    const [y, m] = ym.split("-").map(Number);
+    const { data: closing } = await adminClient
+      .from("monthly_closings")
+      .select("year")
+      .eq("year", y)
+      .eq("month", m)
+      .maybeSingle();
+    if (closing) {
+      return NextResponse.json({
+        error: `${y}년 ${m}월은 마감된 기간입니다. 관리자에게 문의하세요.`
+      }, { status: 400 });
+    }
+  }
+
   // 날짜만 있는 경우 시간 보정 (국세청 양식: 날짜만 있고 시간 없음)
   function normalizeTime(val: string, defaultTime: string): string {
     if (!val) return "";
@@ -64,11 +87,6 @@ export async function POST(req: NextRequest) {
   if (errors.length > 0) {
     return NextResponse.json({ error: "입력 오류", details: errors }, { status: 400 });
   }
-
-  const adminClient = createServiceClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
 
   const inserts = rows.map(r => {
     const depTime = normalizeTime(r.departure_time, "09:00:00");

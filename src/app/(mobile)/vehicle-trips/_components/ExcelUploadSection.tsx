@@ -3,7 +3,7 @@ import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 /**
- * 국세청 업무용 승용차 운행기록부 양식 자동 감지 파서
+ * 국세청 업무용 승용차 운행기록부 양식 자동 감지 파서 + 시트 선택
  *
  * [구 양식] I11 = "⑤ 주행 전 계기판의 거리(km)"
  *   D(3)=날짜  I(8)=출발km  K(10)=도착km
@@ -14,6 +14,8 @@ import { useRouter } from "next/navigation";
  *   P(15)=출퇴근  R(17)=업무  T(19)=개인  V(21)=하이패스  W(22)=기타
  *
  * 데이터 행: index 12~42 (엑셀 행 13~43)
+ *
+ * 다중 시트 파일: 시트 선택 UI 표시 → 이번 달 시트 자동 하이라이트
  */
 
 interface ParsedRow {
@@ -48,6 +50,22 @@ function toNum(val: unknown): number {
   return isNaN(n) ? 0 : n;
 }
 
+/** 현재 달과 일치할 가능성이 높은 시트 이름 추측 */
+function guessCurrentMonthSheet(names: string[]): string | null {
+  const m = new Date().getMonth() + 1;
+  const y = new Date().getFullYear();
+  const candidates = [
+    `${m}월`, `${String(m).padStart(2,"0")}월`,
+    `${y}-${String(m).padStart(2,"0")}`, `${y}_${String(m).padStart(2,"0")}`,
+    String(m), String(m).padStart(2,"0"),
+  ];
+  for (const c of candidates) {
+    const found = names.find(n => n.trim() === c || n.trim().startsWith(c));
+    if (found) return found;
+  }
+  return null;
+}
+
 const TYPE_COLOR: Record<string, string> = {
   "업무":     "bg-blue-100 text-blue-700",
   "출퇴근":   "bg-emerald-100 text-emerald-700",
@@ -55,16 +73,112 @@ const TYPE_COLOR: Record<string, string> = {
 };
 
 export default function ExcelUploadSection({ vehicleId }: Props) {
-  const router   = useRouter();
-  const fileRef  = useRef<HTMLInputElement>(null);
-  const [step, setStep]           = useState<"idle"|"preview"|"done">("idle");
-  const [rows, setRows]           = useState<ParsedRow[]>([]);
+  const router  = useRouter();
+  const fileRef = useRef<HTMLInputElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const wbRef   = useRef<{ wb: any; XLSX: any } | null>(null);
+
+  const [step, setStep]           = useState<"idle"|"sheets"|"preview"|"done">("idle");
   const [fileName, setFileName]   = useState("");
+  const [sheetNames, setSheetNames]   = useState<string[]>([]);
+  const [suggestedSheet, setSuggestedSheet] = useState<string>("");
+  const [activeSheet, setActiveSheet]       = useState<string>("");
+  const [rows, setRows]           = useState<ParsedRow[]>([]);
   const [loading, setLoading]     = useState(false);
   const [result, setResult]       = useState<string|null>(null);
   const [apiError, setApiError]   = useState<string|null>(null);
   const [debugInfo, setDebugInfo] = useState("");
   const [formatLabel, setFormatLabel] = useState("");
+
+  /** 시트 하나를 파싱해서 preview 단계로 이동 */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function parseSheet(wb: any, XLSX: any, sheetName: string) {
+    setActiveSheet(sheetName);
+    setApiError(null);
+    setDebugInfo("");
+    setFormatLabel("");
+
+    const ws  = wb.Sheets[sheetName];
+    const aoa = XLSX.utils.sheet_to_json(ws, {
+      header: 1, raw: true, defval: null, blankrows: true,
+    }) as unknown[][];
+
+    // ── 양식 자동 감지 ──
+    const headerRow10 = aoa[10] as unknown[];
+    const i11Header   = String(headerRow10?.[8] ?? "").trim();
+    const isNewFormat = i11Header === "도착지" || i11Header.includes("도착");
+    setFormatLabel(isNewFormat ? "신 양식 (도착지 포함)" : "구 양식 (국세청 원본)");
+
+    const parsed: ParsedRow[] = [];
+    for (let i = 12; i <= 42; i++) {
+      const row = aoa[i];
+      if (!row) continue;
+
+      const dateVal = row[3];
+      let arrLoc: string;
+      let depKm:  number;
+      let arrKm:  number;
+      let comKm:  number;
+      let bizKm:  number;
+      let perKm:  number;
+      let tollHp: number;
+      let tollEtc: number;
+
+      if (isNewFormat) {
+        arrLoc  = String(row[8]  ?? "").trim();
+        depKm   = toNum(row[9]);
+        arrKm   = toNum(row[11]);
+        comKm   = toNum(row[15]);
+        bizKm   = toNum(row[17]);
+        perKm   = toNum(row[19]);
+        tollHp  = toNum(row[21]);
+        tollEtc = toNum(row[22]);
+      } else {
+        arrLoc  = "";
+        depKm   = toNum(row[8]);
+        arrKm   = toNum(row[10]);
+        comKm   = toNum(row[14]);
+        bizKm   = toNum(row[16]);
+        perKm   = toNum(row[18]);
+        tollHp  = toNum(row[20]);
+        tollEtc = toNum(row[21]);
+      }
+
+      if (!depKm && !arrKm) continue;
+      if (!dateVal)         continue;
+
+      let trip_type = "업무";
+      if (comKm > 0)       trip_type = "출퇴근";
+      else if (perKm > 0)  trip_type = "개인사용";
+      else if (bizKm > 0)  trip_type = "업무";
+
+      const dateStr  = toDateStr(dateVal);
+      const errors: string[] = [];
+      if (!dateStr || dateStr.length < 8) errors.push("날짜 오류");
+      if (arrKm <= depKm)                 errors.push("도착km ≤ 출발km");
+
+      parsed.push({
+        rowNum:   i - 11,
+        date:     dateStr,
+        arr_loc:  arrLoc,
+        dep_km:   depKm,
+        arr_km:   arrKm,
+        distance: arrKm - depKm,
+        trip_type,
+        toll_fee: tollHp + tollEtc,
+        error:    errors.length ? errors.join(", ") : undefined,
+      });
+    }
+
+    if (parsed.length === 0) {
+      const s = aoa[12] as unknown[];
+      const fmt = isNewFormat ? "신양식" : "구양식";
+      const kmIdx = isNewFormat ? `J(9)=${s?.[9]}` : `I(8)=${s?.[8]}`;
+      setDebugInfo(`${fmt} / 총행수:${aoa.length} / 13행: D=${s?.[3]} ${kmIdx}`);
+    }
+    setRows(parsed);
+    setStep("preview");
+  }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -73,99 +187,34 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
     setApiError(null);
     setDebugInfo("");
     setFormatLabel("");
+    setRows([]);
+    wbRef.current = null;
+
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
         const XLSX = await import("xlsx");
-        const wb  = XLSX.read(ev.target?.result, { type: "array", cellDates: false, cellNF: false });
-        const ws  = wb.Sheets[wb.SheetNames[0]];
-        const aoa = XLSX.utils.sheet_to_json(ws, {
-          header: 1, raw: true, defval: null, blankrows: true,
-        }) as unknown[][];
+        const wb   = XLSX.read(ev.target?.result, { type: "array", cellDates: false, cellNF: false });
+        wbRef.current = { wb, XLSX };
 
-        // ── 양식 자동 감지 ──
-        // I11(row10, idx8) 헤더로 구분: "도착지" → 신 양식, "주행 전" → 구 양식
-        const headerRow10 = aoa[10] as unknown[];
-        const i11Header   = String(headerRow10?.[8] ?? "").trim();
-        const isNewFormat = i11Header === "도착지" || i11Header.includes("도착");
-        setFormatLabel(isNewFormat ? "신 양식 (도착지 포함)" : "구 양식 (국세청 원본)");
-
-        const parsed: ParsedRow[] = [];
-        for (let i = 12; i <= 42; i++) {
-          const row = aoa[i];
-          if (!row) continue;
-
-          const dateVal = row[3]; // D열 (공통)
-          let arrLoc: string;
-          let depKm:  number;
-          let arrKm:  number;
-          let comKm:  number;
-          let bizKm:  number;
-          let perKm:  number;
-          let tollHp: number;
-          let tollEtc:number;
-
-          if (isNewFormat) {
-            // 신 양식: I=도착지 J=출발km L=도착km P=출퇴근 R=업무 T=개인 V=하이패스 W=기타
-            arrLoc  = String(row[8]  ?? "").trim();
-            depKm   = toNum(row[9]);   // J
-            arrKm   = toNum(row[11]);  // L
-            comKm   = toNum(row[15]); // P
-            bizKm   = toNum(row[17]); // R
-            perKm   = toNum(row[19]); // T
-            tollHp  = toNum(row[21]); // V
-            tollEtc = toNum(row[22]); // W
-          } else {
-            // 구 양식: I=출발km K=도착km O=출퇴근 Q=업무 S=개인 U=하이패스 V=기타
-            arrLoc  = "";
-            depKm   = toNum(row[8]);   // I
-            arrKm   = toNum(row[10]);  // K
-            comKm   = toNum(row[14]); // O
-            bizKm   = toNum(row[16]); // Q
-            perKm   = toNum(row[18]); // S
-            tollHp  = toNum(row[20]); // U
-            tollEtc = toNum(row[21]); // V
-          }
-
-          if (!depKm && !arrKm) continue;
-          if (!dateVal)         continue;
-
-          let trip_type = "업무";
-          if (comKm > 0)       trip_type = "출퇴근";
-          else if (perKm > 0)  trip_type = "개인사용";
-          else if (bizKm > 0)  trip_type = "업무";
-
-          const dateStr  = toDateStr(dateVal);
-          const errors: string[] = [];
-          if (!dateStr || dateStr.length < 8) errors.push("날짜 오류");
-          if (arrKm <= depKm)                 errors.push("도착km ≤ 출발km");
-
-          parsed.push({
-            rowNum:   i - 11,
-            date:     dateStr,
-            arr_loc:  arrLoc,
-            dep_km:   depKm,
-            arr_km:   arrKm,
-            distance: arrKm - depKm,
-            trip_type,
-            toll_fee: tollHp + tollEtc,
-            error:    errors.length ? errors.join(", ") : undefined,
-          });
+        if (wb.SheetNames.length > 1) {
+          const suggested = guessCurrentMonthSheet(wb.SheetNames);
+          setSheetNames(wb.SheetNames);
+          setSuggestedSheet(suggested ?? "");
+          setStep("sheets");
+        } else {
+          parseSheet(wb, XLSX, wb.SheetNames[0]);
         }
-
-        if (parsed.length === 0) {
-          const s = aoa[12] as unknown[];
-          const fmt = isNewFormat ? "신양식" : "구양식";
-          const kmIdx = isNewFormat ? `J(9)=${s?.[9]}` : `I(8)=${s?.[8]}`;
-          setDebugInfo(`${fmt} / 총행수:${aoa.length} / 13행: D=${s?.[3]} ${kmIdx}`);
-        }
-        setRows(parsed);
-        setStep("preview");
       } catch (err: unknown) {
         setApiError(`파싱 오류: ${err instanceof Error ? err.message : String(err)}`);
       }
     };
     reader.readAsArrayBuffer(file);
+  }
+
+  function handleSelectSheet(name: string) {
+    if (!wbRef.current) return;
+    parseSheet(wbRef.current.wb, wbRef.current.XLSX, name);
   }
 
   const validRows   = rows.filter(r => !r.error);
@@ -186,9 +235,9 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
       trip_type:        r.trip_type,
     }));
     const res  = await fetch("/api/trips/bulk", {
-      method: "POST",
+      method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ vehicle_id: vehicleId, rows: payload }),
+      body:    JSON.stringify({ vehicle_id: vehicleId, rows: payload }),
     });
     const data = await res.json();
     setLoading(false);
@@ -204,6 +253,8 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
   function handleReset() {
     setStep("idle"); setRows([]); setFileName("");
     setResult(null); setApiError(null); setDebugInfo(""); setFormatLabel("");
+    setSheetNames([]); setSuggestedSheet(""); setActiveSheet("");
+    wbRef.current = null;
     if (fileRef.current) fileRef.current.value = "";
   }
 
@@ -240,18 +291,14 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
             </div>
           )}
 
-          {/* ── preview ── */}
-          {step === "preview" && (
+          {/* ── sheets (시트 선택) ── */}
+          {step === "sheets" && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold">📄 {fileName}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {formatLabel && <span className="text-primary/70 font-medium">[{formatLabel}]</span>}
-                    {" "}파싱 결과 · <span className="text-emerald-600 font-medium">정상 {validRows.length}건</span>
-                    {invalidRows.length > 0 && (
-                      <span className="text-amber-600 font-medium"> · 제외 {invalidRows.length}건</span>
-                    )}
+                    시트 {sheetNames.length}개 발견 — 업로드할 월 시트를 선택하세요
                   </p>
                 </div>
                 <button
@@ -260,6 +307,75 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
                 >
                   다시 선택
                 </button>
+              </div>
+
+              {suggestedSheet && (
+                <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-2.5 text-xs text-blue-700">
+                  💡 이번 달({new Date().getMonth()+1}월)로 추정되는 시트:
+                  <span className="font-semibold"> {suggestedSheet}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-4 gap-2">
+                {sheetNames.map(name => {
+                  const isSuggested = name === suggestedSheet;
+                  return (
+                    <button
+                      key={name}
+                      onClick={() => handleSelectSheet(name)}
+                      className={`rounded-xl border px-3 py-3 text-sm font-medium text-left transition-colors
+                        ${isSuggested
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border bg-background hover:bg-muted"}`}
+                    >
+                      {name}
+                      {isSuggested && (
+                        <span className="ml-1 text-xs font-semibold text-primary">★</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── preview ── */}
+          {step === "preview" && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold">
+                    📄 {fileName}
+                    {activeSheet && sheetNames.length > 1 && (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        [{activeSheet} 시트]
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {formatLabel && <span className="text-primary/70 font-medium">[{formatLabel}]</span>}
+                    {" "}파싱 결과 · <span className="text-emerald-600 font-medium">정상 {validRows.length}건</span>
+                    {invalidRows.length > 0 && (
+                      <span className="text-amber-600 font-medium"> · 제외 {invalidRows.length}건</span>
+                    )}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  {sheetNames.length > 1 && (
+                    <button
+                      onClick={() => setStep("sheets")}
+                      className="text-xs text-primary hover:text-primary/80 border border-primary/30 rounded-lg px-3 py-1.5"
+                    >
+                      시트 변경
+                    </button>
+                  )}
+                  <button
+                    onClick={handleReset}
+                    className="text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5"
+                  >
+                    다시 선택
+                  </button>
+                </div>
               </div>
 
               {/* 0건 경고 */}

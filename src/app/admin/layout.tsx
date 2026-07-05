@@ -23,7 +23,8 @@ export default async function AdminLayout({
     { href: "/admin/trips",     label: "운행 현황" },
     { href: "/admin/vehicles",  label: "차량 관리" },
     { href: "/admin/drivers",   label: "운전자 관리" },
-    { href: "/admin/approvals", label: "승인 관리" },
+    { href: "/admin/approvals",    label: "승인 관리" },
+    { href: "/admin/monthly-close", label: "월별 마감" },
   ];
 
   return (
