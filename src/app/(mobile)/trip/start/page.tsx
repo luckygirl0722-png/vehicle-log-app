@@ -51,25 +51,27 @@ export default async function TripStartPage() {
     );
   }
 
-  // 차량별 마지막 도착km
-  const { data: lastTrips } = await supabase
-    .from("trip_logs").select("vehicle_id, arrival_km")
-    .not("arrival_km", "is", null)
-    .order("departure_time", { ascending: false });
+  // 차량별 마지막 도착km + 최근 출발지 — 병렬 조회
+  const [{ data: lastTrips }, { data: recentLocs }] = await Promise.all([
+    supabase
+      .from("trip_logs").select("vehicle_id, arrival_km")
+      .in("vehicle_id", assignedIds)         // 배정 차량만 (풀 테이블 스캔 방지)
+      .not("arrival_km", "is", null)
+      .order("departure_time", { ascending: false })
+      .limit(assignedIds.length * 3 + 5),    // 차량당 최근 3건이면 충분
+    supabase
+      .from("trip_logs").select("departure_location")
+      .eq("driver_id", driver.id)
+      .not("departure_location", "eq", "")
+      .order("departure_time", { ascending: false })
+      .limit(20),
+  ]);
 
   const lastKmMap: Record<string, number> = {};
   lastTrips?.forEach(t => {
     if (t.vehicle_id && t.arrival_km !== null && !(t.vehicle_id in lastKmMap))
       lastKmMap[t.vehicle_id] = t.arrival_km;
   });
-
-  // 최근 출발지 (중복 제거, 최대 5개)
-  const { data: recentLocs } = await supabase
-    .from("trip_logs").select("departure_location")
-    .eq("driver_id", driver.id)
-    .not("departure_location", "eq", "")
-    .order("departure_time", { ascending: false })
-    .limit(20);
 
   const uniqueRecent = [...new Set(recentLocs?.map(t => t.departure_location) ?? [])].slice(0, 5);
   const quickLocations = [...new Set([...DEFAULT_LOCATIONS, ...uniqueRecent])].slice(0, 6);

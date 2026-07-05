@@ -1,5 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
+
+// 서비스 롤 클라이언트 — 모듈 레벨 싱글턴 (요청마다 재생성 방지)
+const adminClient = createServiceClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Fragment } from "react";
@@ -79,11 +85,6 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
   const monthLabel   = selectedMonth.toLocaleDateString("ko-KR", { year: "numeric", month: "long" });
 
   // ── 서비스 롤로 차량 전체 운전자 기록 조회 (RLS 우회) ──
-  const adminClient = createServiceClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-
   const { data: trips } = selectedVehicleId
     ? await adminClient
         .from("trip_logs")

@@ -1,7 +1,6 @@
 "use client";
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import * as XLSX from "xlsx";
 
 /**
  * 국세청 업무용 승용차 운행기록부 양식 자동 감지 파서
@@ -75,8 +74,9 @@ export default function ExcelUploadSection({ vehicleId }: Props) {
     setDebugInfo("");
     setFormatLabel("");
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       try {
+        const XLSX = await import("xlsx");
         const wb  = XLSX.read(ev.target?.result, { type: "array", cellDates: false, cellNF: false });
         const ws  = wb.Sheets[wb.SheetNames[0]];
         const aoa = XLSX.utils.sheet_to_json(ws, {

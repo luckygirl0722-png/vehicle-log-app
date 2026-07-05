@@ -12,23 +12,25 @@ export default async function MobileHomePage() {
   const { data: driver } = await supabase
     .from("drivers").select("id, name").eq("user_id", user.id).single();
 
-  const { data: activeTrip } = driver
-    ? await supabase.from("trip_logs")
-        .select("id, departure_time, departure_location, departure_km, purpose, trip_type")
-        .eq("driver_id", driver.id).is("arrival_time", null).eq("status", "draft")
-        .order("departure_time", { ascending: false }).limit(1).maybeSingle()
-    : { data: null };
-
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
   const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
 
-  const { data: monthlyStats } = driver
-    ? await supabase.from("trip_logs")
-        .select("distance_km, toll_fee, status, trip_type, arrival_time")
-        .eq("driver_id", driver.id)
-        .gte("departure_time", monthStart).lt("departure_time", monthEnd)
-    : { data: null };
+  // activeTrip + monthlyStats 병렬 조회
+  const [activeTripRes, monthlyStatsRes] = driver
+    ? await Promise.all([
+        supabase.from("trip_logs")
+          .select("id, departure_time, departure_location, departure_km, purpose, trip_type")
+          .eq("driver_id", driver.id).is("arrival_time", null).eq("status", "draft")
+          .order("departure_time", { ascending: false }).limit(1).maybeSingle(),
+        supabase.from("trip_logs")
+          .select("distance_km, toll_fee, status, trip_type, arrival_time")
+          .eq("driver_id", driver.id)
+          .gte("departure_time", monthStart).lt("departure_time", monthEnd),
+      ])
+    : ([{ data: null }, { data: null }] as const);
+  const activeTrip   = activeTripRes.data;
+  const monthlyStats = monthlyStatsRes.data;
 
   const bizStats      = monthlyStats?.filter(t => (t.trip_type ?? "업무") === "업무") ?? [];
   const commuteStats  = monthlyStats?.filter(t => t.trip_type === "출퇴근") ?? [];
