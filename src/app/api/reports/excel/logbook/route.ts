@@ -139,6 +139,21 @@ export async function GET(request: NextRequest) {
   ws["D7"] = { v: vehicle.model || "—",           t: "s" };
   ws["F7"] = { v: vehicle.plate_number,            t: "s" };
 
+  // ── D열 날짜 직접 입력 ────────────────────────────────────
+  // D13 = =E3, D14 = =D13+1 ... 수식의 캐시된 값이 구 날짜를 유지하는 문제 방지.
+  // Protected View / 자동계산 비활성화 환경에서도 올바른 날짜가 표시되도록
+  // 수식 대신 직접 날짜 시리얼을 기재한다.
+  const dateFmt = (ws["D13"]?.z as string | undefined) ?? "mm-dd-aaa";
+  for (let d = 1; d <= 31; d++) {
+    const r = 12 + d;
+    if (d <= lastDay) {
+      ws[`D${r}`] = { v: toExcelSerial(y, mo, d), t: "n", z: dateFmt };
+    } else {
+      // 해당 월에 없는 날짜 행은 빈 셀로 초기화
+      delete ws[`D${r}`];
+    }
+  }
+
   // ── 데이터 행 입력 (row 13 = 1일, row 43 = 31일) ─────────
   for (const [day, agg] of dayMap) {
     if (day < 1 || day > 31) continue;
