@@ -60,6 +60,8 @@ export default function TripsClient({ trips, pagination, summary, currentParams 
   const [selectedTrip, setSelectedTrip]   = useState<Trip | null>(null);
   const [xlsxPending, startXlsx]          = useTransition();
   const [xlsxMsg, setXlsxMsg]             = useState<string | null>(null);
+  const [logbookPending, setLogbookPending] = useState(false);
+  const [logbookMsg, setLogbookMsg]         = useState<string | null>(null);
 
   async function handleExcelDownload() {
     setXlsxMsg(null);
@@ -85,6 +87,33 @@ export default function TripsClient({ trips, pagination, summary, currentParams 
       setTimeout(() => setXlsxMsg(null), 3000);
     });
   }
+  async function handleLogbookDownload() {
+    setLogbookMsg(null);
+    setLogbookPending(true);
+    try {
+      const res = await fetch(`/api/reports/excel/logbook?${currentParams}`);
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setLogbookMsg(d.error ?? "다운로드 실패");
+        setTimeout(() => setLogbookMsg(null), 5000);
+        return;
+      }
+      const blob = await res.blob();
+      const cd   = res.headers.get("Content-Disposition") ?? "";
+      const match = cd.match(/filename\*=UTF-8''(.+)/i);
+      const fn   = match ? decodeURIComponent(match[1]) : "차량운행기록부.xlsx";
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href = url; a.download = fn;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+      setLogbookMsg("운행기록부 다운로드 완료!");
+      setTimeout(() => setLogbookMsg(null), 3000);
+    } finally {
+      setLogbookPending(false);
+    }
+  }
+
   const [modalOpen, setModalOpen]         = useState(false);
   const [deleteTarget, setDeleteTarget]   = useState<Trip | null>(null);
   const [deleteOpen, setDeleteOpen]       = useState(false);
@@ -127,15 +156,43 @@ export default function TripsClient({ trips, pagination, summary, currentParams 
     return `/admin/trips?${params.toString()}`;
   };
 
+  // 차량 + 월이 모두 지정된 경우에만 운행기록부 다운로드 가능
+  const cpObj       = new URLSearchParams(currentParams);
+  const canLogbook  = !!(cpObj.get("vehicle_id") && cpObj.get("month"));
+
   return (
     <>
       {/* 툴바: Excel 다운로드 */}
-      <div className="flex items-center justify-end gap-3 mb-2">
-        {xlsxMsg && (
-          <span className={`text-xs ${xlsxMsg.includes("실패") ? "text-destructive" : "text-emerald-600"}`}>
-            {xlsxMsg}
+      <div className="flex items-center justify-end gap-3 mb-2 flex-wrap">
+        {(xlsxMsg || logbookMsg) && (
+          <span className={`text-xs ${
+            (xlsxMsg ?? logbookMsg ?? "").includes("실패")
+              ? "text-destructive"
+              : "text-emerald-600"
+          }`}>
+            {xlsxMsg ?? logbookMsg}
           </span>
         )}
+
+        {/* 운행기록부 양식 다운로드 (차량+월 선택 시) */}
+        {canLogbook && (
+          <button
+            onClick={handleLogbookDownload}
+            disabled={logbookPending}
+            className="flex items-center gap-1.5 rounded-lg border border-blue-600 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+            </svg>
+            {logbookPending ? "생성 중..." : "운행기록부 다운로드"}
+          </button>
+        )}
+
+        {/* 운행현황 Excel 다운로드 */}
         <button
           onClick={handleExcelDownload}
           disabled={xlsxPending || pagination.total === 0}
