@@ -42,6 +42,7 @@ function sc(
 }
 
 export async function GET(request: NextRequest) {
+  try {
   const { error } = await withAuth(true);
   if (error) return error;
 
@@ -209,4 +210,11 @@ export async function GET(request: NextRequest) {
       "Content-Disposition": `attachment; filename*=UTF-8''${encoded}`,
     },
   });
+
+  } catch (err) {
+    // 예상치 못한 예외 → JSON으로 반환해 프론트에서 실제 오류 메시지 표시
+    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    console.error("[logbook API] 서버 오류:", msg);
+    return NextResponse.json({ error: `서버 오류: ${msg}` }, { status: 500 });
+  }
 }
