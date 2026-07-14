@@ -28,6 +28,26 @@ function toExcelSerial(y: number, mo: number, d: number): number {
   return Math.floor(Date.UTC(y, mo - 1, d) / 86400000) + 25569;
 }
 
+/**
+ * 셀에 값을 쓰되 템플릿의 스타일(테두리·배경색·폰트 등, s 속성)을 보존한다.
+ * 기존 셀 객체를 spread하고 값·타입·포맷만 덮어씀.
+ * 수식(f)은 직접 값으로 대체하므로 제거.
+ */
+function sc(
+  ws: XLSX.WorkSheet,
+  addr: string,
+  v: XLSX.CellObject["v"],
+  t: XLSX.ExcelDataType,
+  z?: string
+): void {
+  const prev = (ws[addr] as XLSX.CellObject | undefined) ?? {};
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { f: _f, ...style } = prev as XLSX.CellObject & { f?: string };
+  const cell: XLSX.CellObject = { ...style, v, t };
+  if (z !== undefined) cell.z = z;
+  ws[addr] = cell;
+}
+
 export async function GET(request: NextRequest) {
   const { error } = await withAuth(true);
   if (error) return error;
@@ -134,10 +154,10 @@ export async function GET(request: NextRequest) {
 
   // ── 헤더 셀 입력 ─────────────────────────────────────────
   const lastDay = new Date(y, mo, 0).getDate(); // 해당 월의 마지막 날
-  ws["E3"] = { v: toExcelSerial(y, mo, 1),       t: "n", z: "yyyy-mm-dd" };
-  ws["G3"] = { v: toExcelSerial(y, mo, lastDay), t: "n", z: "yyyy-mm-dd" };
-  ws["D7"] = { v: vehicle.model || "—",           t: "s" };
-  ws["F7"] = { v: vehicle.plate_number,            t: "s" };
+  sc(ws, "E3", toExcelSerial(y, mo, 1),       "n", "yyyy-mm-dd");
+  sc(ws, "G3", toExcelSerial(y, mo, lastDay), "n", "yyyy-mm-dd");
+  sc(ws, "D7", vehicle.model || "—",           "s");
+  sc(ws, "F7", vehicle.plate_number,            "s");
 
   // ── D열 날짜 직접 입력 ────────────────────────────────────
   // 원본 D13=`=E3`, D14=`=D13+1`... 수식의 캐시값(=구 날짜)이 Protected View에서
@@ -145,35 +165,37 @@ export async function GET(request: NextRequest) {
   //
   // 해당 월보다 긴 행(예: 6월인데 d=31)은 원본 수식 =D42+1 이 다음 달 날짜를
   // 표시하지 않도록 명시적으로 빈 문자열로 덮어쓴다 (delete 대신).
+  // sc()를 사용하므로 템플릿의 테두리/배경색은 자동 보존됨.
   const dateFmt = (ws["D13"]?.z as string | undefined) ?? "mm-dd-aaa";
   for (let d = 1; d <= 31; d++) {
     const r = 12 + d;
     if (d <= lastDay) {
-      ws[`D${r}`] = { v: toExcelSerial(y, mo, d), t: "n", z: dateFmt };
+      sc(ws, `D${r}`, toExcelSerial(y, mo, d), "n", dateFmt);
     } else {
       // 공식 =D42+1 이 다음 달 날짜(예: 07-01)를 표시하지 않도록 명시적 초기화
-      ws[`D${r}`] = { v: "", t: "s" };
+      sc(ws, `D${r}`, "", "s");
       // 거리 공식 =L-J 도 0이 아닌 빈 셀로 초기화
-      ws[`N${r}`] = { v: "", t: "s" };
+      sc(ws, `N${r}`, "", "s");
     }
   }
 
   // ── 데이터 행 입력 (row 13 = 1일, row 43 = 31일) ─────────
+  // sc()로 기존 셀의 스타일(테두리·배경색)을 보존하면서 값만 덮어씀
   for (const [day, agg] of dayMap) {
     if (day < 1 || day > 31) continue;
     const r = 12 + day; // Excel row number
 
-    if (agg.drivers.size) ws[`G${r}`] = { v: [...agg.drivers].join(", "), t: "s" };
-    if (agg.arrLoc)       ws[`I${r}`] = { v: agg.arrLoc, t: "s" };
+    if (agg.drivers.size) sc(ws, `G${r}`, [...agg.drivers].join(", "), "s");
+    if (agg.arrLoc)       sc(ws, `I${r}`, agg.arrLoc, "s");
 
-    ws[`J${r}`] = { v: agg.depKm,             t: "n", z: "#,##0" };
-    ws[`L${r}`] = { v: agg.arrKm,             t: "n", z: "#,##0" };
-    ws[`N${r}`] = { v: agg.arrKm - agg.depKm, t: "n", z: "#,##0" }; // 공식 대체 (직접 값 입력)
+    sc(ws, `J${r}`, agg.depKm,             "n", "#,##0");
+    sc(ws, `L${r}`, agg.arrKm,             "n", "#,##0");
+    sc(ws, `N${r}`, agg.arrKm - agg.depKm, "n", "#,##0"); // 공식 대체 (직접 값 입력)
 
-    if (agg.commuteKm  > 0) ws[`P${r}`] = { v: agg.commuteKm,  t: "n", z: "#,##0" };
-    if (agg.bizKm      > 0) ws[`R${r}`] = { v: agg.bizKm,      t: "n", z: "#,##0" };
-    if (agg.personalKm > 0) ws[`T${r}`] = { v: agg.personalKm, t: "n", z: "#,##0" };
-    if (agg.tollFee    > 0) ws[`V${r}`] = { v: agg.tollFee,    t: "n", z: "#,##0" };
+    if (agg.commuteKm  > 0) sc(ws, `P${r}`, agg.commuteKm,  "n", "#,##0");
+    if (agg.bizKm      > 0) sc(ws, `R${r}`, agg.bizKm,      "n", "#,##0");
+    if (agg.personalKm > 0) sc(ws, `T${r}`, agg.personalKm, "n", "#,##0");
+    if (agg.tollFee    > 0) sc(ws, `V${r}`, agg.tollFee,    "n", "#,##0");
   }
 
   // ── 합계 행 직접 계산 (공식 대체) ────────────────────────
@@ -183,14 +205,13 @@ export async function GET(request: NextRequest) {
     totBiz  += agg.bizKm + agg.commuteKm;
     totPer  += agg.personalKm;
   }
-  ws["J45"] = { v: totDist, t: "n", z: "#,##0" };
-  ws["P45"] = { v: totBiz,  t: "n", z: "#,##0" };
-  ws["T45"] = { v: totPer,  t: "n", z: "#,##0" };
-  ws["V45"] = {
-    v: totDist > 0 ? Math.round((totBiz / totDist) * 1000) / 10 : 0,
-    t: "n",
-    z: "0.0",
-  };
+  sc(ws, "J45", totDist, "n", "#,##0");
+  sc(ws, "P45", totBiz,  "n", "#,##0");
+  sc(ws, "T45", totPer,  "n", "#,##0");
+  sc(ws, "V45",
+    totDist > 0 ? Math.round((totBiz / totDist) * 1000) / 10 : 0,
+    "n", "0.0"
+  );
 
   // ── 출력 ──────────────────────────────────────────────────
   const outBuf  = XLSX.write(wb, { type: "buffer", bookType: "xlsx", cellStyles: true });
