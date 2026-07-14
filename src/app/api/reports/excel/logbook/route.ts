@@ -1,25 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAuth, badReq, serverErr } from "@/lib/api/auth-guard";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
+import * as XLSX from "xlsx";
+import JSZip from "jszip";
+import fs from "fs";
 import path from "path";
 
 /**
  * GET /api/reports/excel/logbook?vehicle_id=...&month=YYYY-MM
  *
- * 국세청 업무용 승용차 운행기록부 양식 (신 양식, 도착지 포함)에
- * DB 운행 기록을 채워 Excel 파일로 반환합니다.
+ * 국세청 업무용 승용차 운행기록부 양식에 DB 운행 기록을 채워 반환합니다.
  *
- * xlsx-populate 사용: 순수 JS 라이브러리로 템플릿의 테두리·배경색·폰트를
- * 그대로 보존하면서 값만 덮어씁니다.
+ * 서식 보존 방식:
+ *   1. SheetJS로 템플릿 읽기 + 데이터 채우기 (sc() 헬퍼로 s 인덱스 보존)
+ *   2. SheetJS로 xlsx 출력
+ *   3. JSZip으로 템플릿의 xl/styles.xml 을 출력 파일에 주입
+ *      → 셀의 s 인덱스가 원본 스타일 테이블을 그대로 참조하므로 테두리·배경색 복원
  */
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const XlsxPopulate = require("xlsx-populate");
 
 const svc = createServiceClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+/** JS UTC 날짜 → Excel 날짜 시리얼 (1900-01-01 = 1 기준) */
+function toExcelSerial(y: number, mo: number, d: number): number {
+  return Math.floor(Date.UTC(y, mo - 1, d) / 86400000) + 25569;
+}
+
+/**
+ * 셀에 값을 쓰되 기존 셀의 스타일 인덱스(s)를 보존한다.
+ * 빈 셀(ws[addr] === undefined)도 템플릿에서 s 속성을 가져와 보존한다.
+ */
+function sc(
+  ws: XLSX.WorkSheet,
+  addr: string,
+  v: XLSX.CellObject["v"],
+  t: XLSX.ExcelDataType,
+  z?: string
+): void {
+  const prev = (ws[addr] as XLSX.CellObject | undefined) ?? {};
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { f: _f, ...style } = prev as XLSX.CellObject & { f?: string };
+  const cell: XLSX.CellObject = { ...style, v, t };
+  if (z !== undefined) cell.z = z;
+  ws[addr] = cell;
+}
 
 export async function GET(request: NextRequest) {
   const { error } = await withAuth(true);
@@ -43,7 +69,7 @@ export async function GET(request: NextRequest) {
     .single();
   if (vErr || !vehicle) return badReq("차량을 찾을 수 없습니다.");
 
-  // ── 운행 기록 조회 ────────────────────────────────────────
+  // ── 운행 기록 (해당 월 KST 기준) ──────────────────────────
   const KST_MS     = 9 * 60 * 60 * 1000;
   const monthStart = new Date(Date.UTC(y, mo - 1, 1) - KST_MS).toISOString();
   const monthEnd   = new Date(Date.UTC(y, mo,     1) - KST_MS).toISOString();
@@ -109,57 +135,55 @@ export async function GET(request: NextRequest) {
     if (name) agg.drivers.add(name);
   }
 
-  // ── 템플릿 로드 (xlsx-populate — 스타일 완전 보존) ────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let wb: any;
+  // ── 템플릿 읽기 ───────────────────────────────────────────
+  const templatePath = path.join(process.cwd(), "public", "차량운행기록부_양식.xlsx");
+  let templateBuf: Buffer;
   try {
-    wb = await XlsxPopulate.fromFileAsync(
-      path.join(process.cwd(), "public", "차량운행기록부_양식.xlsx")
-    );
+    templateBuf = fs.readFileSync(templatePath);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return serverErr(`템플릿 로드 실패: ${msg}`);
+    return serverErr(`템플릿 파일 읽기 실패: ${msg}`);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sheet   = wb.sheet(0) as any;
+  const wb = XLSX.read(templateBuf, { type: "buffer", cellStyles: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+
   const lastDay = new Date(y, mo, 0).getDate();
+  const dateFmt = (ws["D13"]?.z as string | undefined) ?? "mm-dd-aaa";
 
   // ── 헤더 셀 입력 ─────────────────────────────────────────
-  // xlsx-populate: cell.value(x) 호출 시 기존 스타일(테두리·배경색·폰트)은 자동 보존
-  sheet.cell("E3").value(new Date(Date.UTC(y, mo - 1, 1)));
-  sheet.cell("G3").value(new Date(Date.UTC(y, mo - 1, lastDay)));
-  sheet.cell("D7").value(vehicle.model || "—");
-  sheet.cell("F7").value(vehicle.plate_number);
+  sc(ws, "E3", toExcelSerial(y, mo, 1),       "n", "yyyy-mm-dd");
+  sc(ws, "G3", toExcelSerial(y, mo, lastDay), "n", "yyyy-mm-dd");
+  sc(ws, "D7", vehicle.model || "—",           "s");
+  sc(ws, "F7", vehicle.plate_number,            "s");
 
   // ── D열 날짜 직접 입력 ────────────────────────────────────
-  // 수식(=E3, =D13+1 등)을 직접 값으로 대체 → Protected View 캐시 문제 방지
   for (let d = 1; d <= 31; d++) {
-    const row = 12 + d;
+    const r = 12 + d;
     if (d <= lastDay) {
-      sheet.cell(`D${row}`).value(new Date(Date.UTC(y, mo - 1, d)));
+      sc(ws, `D${r}`, toExcelSerial(y, mo, d), "n", dateFmt);
     } else {
-      sheet.cell(`D${row}`).value(null); // 해당 월보다 긴 행 초기화
-      sheet.cell(`N${row}`).value(null); // 거리 공식 셀도 초기화
+      sc(ws, `D${r}`, "", "s");
+      sc(ws, `N${r}`, "", "s");
     }
   }
 
   // ── 데이터 행 입력 ────────────────────────────────────────
   for (const [day, agg] of dayMap) {
     if (day < 1 || day > 31) continue;
-    const row = 12 + day;
+    const r = 12 + day;
 
-    if (agg.drivers.size) sheet.cell(`G${row}`).value([...agg.drivers].join(", "));
-    if (agg.arrLoc)       sheet.cell(`I${row}`).value(agg.arrLoc);
+    if (agg.drivers.size) sc(ws, `G${r}`, [...agg.drivers].join(", "), "s");
+    if (agg.arrLoc)       sc(ws, `I${r}`, agg.arrLoc,                  "s");
 
-    sheet.cell(`J${row}`).value(agg.depKm);
-    sheet.cell(`L${row}`).value(agg.arrKm);
-    sheet.cell(`N${row}`).value(agg.arrKm - agg.depKm);
+    sc(ws, `J${r}`, agg.depKm,             "n", "#,##0");
+    sc(ws, `L${r}`, agg.arrKm,             "n", "#,##0");
+    sc(ws, `N${r}`, agg.arrKm - agg.depKm, "n", "#,##0");
 
-    if (agg.commuteKm  > 0) sheet.cell(`P${row}`).value(agg.commuteKm);
-    if (agg.bizKm      > 0) sheet.cell(`R${row}`).value(agg.bizKm);
-    if (agg.personalKm > 0) sheet.cell(`T${row}`).value(agg.personalKm);
-    if (agg.tollFee    > 0) sheet.cell(`V${row}`).value(agg.tollFee);
+    if (agg.commuteKm  > 0) sc(ws, `P${r}`, agg.commuteKm,  "n", "#,##0");
+    if (agg.bizKm      > 0) sc(ws, `R${r}`, agg.bizKm,      "n", "#,##0");
+    if (agg.personalKm > 0) sc(ws, `T${r}`, agg.personalKm, "n", "#,##0");
+    if (agg.tollFee    > 0) sc(ws, `V${r}`, agg.tollFee,    "n", "#,##0");
   }
 
   // ── 합계 행 ──────────────────────────────────────────────
@@ -169,20 +193,53 @@ export async function GET(request: NextRequest) {
     totBiz  += agg.bizKm + agg.commuteKm;
     totPer  += agg.personalKm;
   }
-  sheet.cell("J45").value(totDist);
-  sheet.cell("P45").value(totBiz);
-  sheet.cell("T45").value(totPer);
-  sheet.cell("V45").value(
-    totDist > 0 ? Math.round((totBiz / totDist) * 1000) / 10 : 0
+  sc(ws, "J45", totDist, "n", "#,##0");
+  sc(ws, "P45", totBiz,  "n", "#,##0");
+  sc(ws, "T45", totPer,  "n", "#,##0");
+  sc(ws, "V45",
+    totDist > 0 ? Math.round((totBiz / totDist) * 1000) / 10 : 0,
+    "n", "0.0"
   );
 
-  // ── 출력 ──────────────────────────────────────────────────
-  const outBuf  = await wb.outputAsync() as Buffer;
+  // ── SheetJS 출력 ──────────────────────────────────────────
+  const outputBuf = XLSX.write(wb, {
+    type: "buffer", bookType: "xlsx", cellStyles: true,
+  }) as Buffer;
+
+  // ── JSZip으로 스타일 파일 주입 ────────────────────────────
+  // SheetJS가 데이터와 s 인덱스를 올바르게 쓰지만 styles.xml이 손실될 수 있으므로
+  // 원본 템플릿의 xl/styles.xml 과 xl/theme/theme1.xml 을 그대로 복사한다.
+  let finalBuf: Buffer;
+  try {
+    const [templateZip, outputZip] = await Promise.all([
+      JSZip.loadAsync(templateBuf),
+      JSZip.loadAsync(outputBuf),
+    ]);
+
+    for (const xmlPath of ["xl/styles.xml", "xl/theme/theme1.xml"]) {
+      const file = templateZip.file(xmlPath);
+      if (file) {
+        outputZip.file(xmlPath, await file.async("uint8array"));
+      }
+    }
+
+    finalBuf = await outputZip.generateAsync({
+      type:               "nodebuffer",
+      compression:        "DEFLATE",
+      compressionOptions: { level: 6 },
+    }) as Buffer;
+  } catch (e) {
+    // JSZip 실패 시 스타일 없는 버전이라도 반환
+    console.error("JSZip style injection failed:", e);
+    finalBuf = outputBuf;
+  }
+
+  // ── 응답 ──────────────────────────────────────────────────
   const period  = `${y}년${mo}월`;
   const fname   = `차량운행기록부_${vehicle.plate_number}_${period}.xlsx`;
   const encoded = encodeURIComponent(fname);
 
-  return new NextResponse(outBuf, {
+  return new NextResponse(finalBuf, {
     headers: {
       "Content-Type":        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "Content-Disposition": `attachment; filename*=UTF-8''${encoded}`,
