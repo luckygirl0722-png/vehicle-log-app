@@ -8,6 +8,8 @@ const nextConfig = {
   reactStrictMode: true,
   eslint:     { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true  },
+  // exceljs는 네이티브 Node.js 모듈을 사용하므로 번들링에서 제외
+  serverExternalPackages: ["exceljs"],
   experimental: {
     outputFileTracingRoot: __dirname,
   },
