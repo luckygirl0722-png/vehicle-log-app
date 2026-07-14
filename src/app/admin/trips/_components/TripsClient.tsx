@@ -93,9 +93,18 @@ export default function TripsClient({ trips, pagination, summary, currentParams 
     try {
       const res = await fetch(`/api/reports/excel/logbook?${currentParams}`);
       if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        setLogbookMsg(d.error ?? "다운로드 실패");
-        setTimeout(() => setLogbookMsg(null), 5000);
+        // 응답 텍스트를 읽은 뒤 JSON 파싱 시도
+        const text = await res.text().catch(() => "");
+        let errMsg: string;
+        try {
+          const d = JSON.parse(text);
+          errMsg = d.error ?? `HTTP ${res.status}`;
+        } catch {
+          // JSON이 아닌 경우(HTML 500 등) → 상태 코드 표시
+          errMsg = `HTTP ${res.status}: ${text.slice(0, 120).replace(/<[^>]+>/g, "").trim() || "서버 오류"}`;
+        }
+        setLogbookMsg(errMsg);
+        setTimeout(() => setLogbookMsg(null), 8000);
         return;
       }
       const blob = await res.blob();
