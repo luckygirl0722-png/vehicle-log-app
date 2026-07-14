@@ -9,7 +9,6 @@ import path from "path";
  * GET /api/reports/excel/logbook?vehicle_id=...&month=YYYY-MM
  *
  * 국세청 업무용 승용차 운행기록부 양식에 DB 운행 기록을 채워 반환합니다.
- * SheetJS 만 사용 (외부 패키지 의존 없음)
  */
 
 const svc = createServiceClient(
@@ -23,7 +22,7 @@ function toExcelSerial(y: number, mo: number, d: number): number {
 }
 
 /**
- * 기존 셀의 스타일 인덱스(s)를 보존하면서 값만 덮어씀.
+ * 셀에 값을 씁니다. 스타일은 건드리지 않고 v/t/z 만 설정.
  * NaN / null / undefined 숫자 값은 0으로 안전하게 처리.
  */
 function sc(
@@ -33,16 +32,14 @@ function sc(
   t: XLSX.ExcelDataType,
   z?: string
 ): void {
-  // 숫자 타입에서 null/undefined/NaN 방지
   let safeV = v;
   if (t === "n") {
     const n = Number(v);
     safeV = isNaN(n) ? 0 : n;
   }
-  const prev = (ws[addr] as XLSX.CellObject | undefined) ?? {};
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { f: _f, ...style } = prev as XLSX.CellObject & { f?: string };
-  const cell: XLSX.CellObject = { ...style, v: safeV, t };
+  // 기존 셀의 formula(f)를 제거하고 순수 값 셀로 교체
+  // cellStyles 없이 읽었으므로 style(s) 속성도 없음 → 안전하게 직접 할당
+  const cell: XLSX.CellObject = { v: safeV, t };
   if (z !== undefined) cell.z = z;
   ws[addr] = cell;
 }
@@ -52,7 +49,6 @@ export async function GET(request: NextRequest) {
   const vehicleId  = sp.get("vehicle_id");
   const monthParam = sp.get("month");
 
-  // 진단: 파라미터 로그
   console.log("[logbook] vehicle_id:", vehicleId, "month:", monthParam);
 
   try {
@@ -63,14 +59,16 @@ export async function GET(request: NextRequest) {
     if (!monthParam) return badReq("month 파라미터가 필요합니다. (예: 2026-07)");
 
     const [y, mo] = monthParam.split("-").map(Number);
-    if (!y || !mo || mo < 1 || mo > 12) return badReq(`month 형식 오류: "${monthParam}" (YYYY-MM 형식 필요)`);
+    if (!y || !mo || mo < 1 || mo > 12)
+      return badReq(`month 형식 오류: "${monthParam}" (YYYY-MM 형식 필요)`);
 
     const { data: vehicle, error: vErr } = await svc
       .from("vehicles")
       .select("plate_number, model")
       .eq("id", vehicleId)
       .single();
-    if (vErr || !vehicle) return badReq(`차량을 찾을 수 없습니다. (vehicle_id: ${vehicleId})`);
+    if (vErr || !vehicle)
+      return badReq(`차량을 찾을 수 없습니다. (vehicle_id: ${vehicleId})`);
 
     console.log("[logbook] 차량:", vehicle.plate_number, y, "년", mo, "월");
 
@@ -88,8 +86,8 @@ export async function GET(request: NextRequest) {
       .eq("vehicle_id", vehicleId)
       .gte("departure_time", monthStart)
       .lt("departure_time",  monthEnd)
-      .not("arrival_km",    "is", null)
-      .not("departure_km",  "is", null)
+      .not("arrival_km",   "is", null)
+      .not("departure_km", "is", null)
       .order("departure_time", { ascending: true });
     if (tErr) return serverErr(`DB 조회 오류: ${tErr.message}`);
 
@@ -106,7 +104,6 @@ export async function GET(request: NextRequest) {
       const kstDate = new Date(trip.departure_time).toLocaleString("en-CA", {
         timeZone: "Asia/Seoul",
       });
-      // en-CA 형식: "2026-07-14, 9:00 AM" → split(",")[0] = "2026-07-14"
       const datePart = kstDate.split(",")[0].trim();
       const day = parseInt(datePart.split("-")[2], 10);
       if (isNaN(day) || day < 1 || day > 31) continue;
@@ -132,11 +129,12 @@ export async function GET(request: NextRequest) {
       else if (trip.trip_type === "개인사용")  agg.personalKm += dist;
       else                                    agg.bizKm      += dist;
       agg.tollFee += Number(trip.toll_fee) || 0;
-      const name = (trip.drivers as unknown as { name?: string })?.name;
+      const driverObj = trip.drivers as unknown as { name?: string } | { name?: string }[] | null;
+      const name = Array.isArray(driverObj) ? driverObj[0]?.name : driverObj?.name;
       if (name) agg.drivers.add(name);
     }
 
-    // ── 템플릿 읽기 ───────────────────────────────────────────
+    // ── 템플릿 읽기 (cellStyles 없이 — 스타일 인덱스 충돌 방지) ─────────
     const templatePath = path.join(process.cwd(), "public", "차량운행기록부_양식.xlsx");
     let templateBuf: Buffer;
     try {
@@ -145,31 +143,36 @@ export async function GET(request: NextRequest) {
       return serverErr(`템플릿 파일 읽기 실패: ${e instanceof Error ? e.message : e}`);
     }
 
-    const wb      = XLSX.read(templateBuf, { type: "buffer", cellStyles: true });
-    const ws      = wb.Sheets[wb.SheetNames[0]];
+    const wb = XLSX.read(templateBuf, { type: "buffer" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
     const lastDay = new Date(y, mo, 0).getDate();
-    const dateFmt = (ws["D13"]?.z as string | undefined) ?? "mm-dd-aaa";
 
+    // 기간 헤더
     sc(ws, "E3", toExcelSerial(y, mo, 1),       "n", "yyyy-mm-dd");
     sc(ws, "G3", toExcelSerial(y, mo, lastDay), "n", "yyyy-mm-dd");
-    sc(ws, "D7", vehicle.model || "—",           "s");
-    sc(ws, "F7", vehicle.plate_number,            "s");
+    // 차량 정보
+    sc(ws, "D7", vehicle.model || "—", "s");
+    sc(ws, "F7", vehicle.plate_number,  "s");
 
+    // 날짜 행 (D13 ~ D43)
+    const dateFmt = "mm/dd/aaa";
     for (let d = 1; d <= 31; d++) {
       const r = 12 + d;
       if (d <= lastDay) {
         sc(ws, `D${r}`, toExcelSerial(y, mo, d), "n", dateFmt);
       } else {
+        // 해당 월에 없는 날짜 행 비우기
         ws[`D${r}`] = { v: "", t: "s" };
         ws[`N${r}`] = { v: "", t: "s" };
       }
     }
 
+    // 운행 데이터 채우기
     for (const [day, agg] of dayMap) {
       if (day < 1 || day > 31) continue;
       const r = 12 + day;
       if (agg.drivers.size) sc(ws, `G${r}`, [...agg.drivers].join(", "), "s");
-      if (agg.arrLoc)       sc(ws, `I${r}`, agg.arrLoc,                  "s");
+      if (agg.arrLoc)       sc(ws, `I${r}`, agg.arrLoc, "s");
       sc(ws, `J${r}`, agg.depKm,             "n", "#,##0");
       sc(ws, `L${r}`, agg.arrKm,             "n", "#,##0");
       sc(ws, `N${r}`, agg.arrKm - agg.depKm, "n", "#,##0");
@@ -179,6 +182,7 @@ export async function GET(request: NextRequest) {
       if (agg.tollFee    > 0) sc(ws, `V${r}`, agg.tollFee,    "n", "#,##0");
     }
 
+    // 합계 행 (45행)
     let totDist = 0, totBiz = 0, totPer = 0;
     for (const agg of dayMap.values()) {
       totDist += agg.arrKm - agg.depKm;
@@ -188,13 +192,13 @@ export async function GET(request: NextRequest) {
     sc(ws, "J45", totDist, "n", "#,##0");
     sc(ws, "P45", totBiz,  "n", "#,##0");
     sc(ws, "T45", totPer,  "n", "#,##0");
-    sc(ws, "V45", totDist > 0 ? Math.round((totBiz / totDist) * 1000) / 10 : 0, "n", "0.0");
+    sc(ws, "V45",
+      totDist > 0 ? Math.round((totBiz / totDist) * 1000) / 10 : 0,
+      "n", "0.0"
+    );
 
-    // ── SheetJS 출력 ──────────────────────────────────────────
-    const finalBuf = XLSX.write(wb, {
-      type: "buffer", bookType: "xlsx", cellStyles: true,
-    }) as Buffer;
-
+    // ── SheetJS 출력 ──────────────────────────────────────────────────────
+    const finalBuf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
     console.log("[logbook] Excel 생성 완료. 버퍼 크기:", finalBuf?.length);
 
     const period  = `${y}년${mo}월`;
@@ -209,9 +213,11 @@ export async function GET(request: NextRequest) {
     });
 
   } catch (err) {
-    // 예상치 못한 예외 → JSON으로 반환 (프론트에서 실제 오류 메시지 표시)
-    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-    console.error("[logbook API] 서버 오류 (vehicle:", vehicleId, "month:", monthParam, "):", msg);
-    return NextResponse.json({ error: `서버 오류[${monthParam}]: ${msg}` }, { status: 500 });
+    const msg = err instanceof Error ? `${err.name}: ${err.message}\n${(err as Error).stack ?? ""}` : String(err);
+    console.error("[logbook API] 서버 오류:", msg);
+    return NextResponse.json(
+      { error: `서버 오류[${monthParam}]: ${msg.slice(0, 300)}` },
+      { status: 500 }
+    );
   }
 }
