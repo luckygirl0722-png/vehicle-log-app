@@ -91,10 +91,14 @@ export default function TripsClient({ trips, pagination, summary, currentParams 
     setLogbookMsg(null);
     setLogbookPending(true);
     try {
-      const res = await fetch(`/api/reports/excel/logbook?${currentParams}`);
+      const url = `/api/reports/excel/logbook?${currentParams}`;
+      console.log("[logbook] 요청 URL:", url);
+      const res = await fetch(url);
+      console.log("[logbook] 응답 status:", res.status, res.ok);
       if (!res.ok) {
         // 응답 텍스트를 읽은 뒤 JSON 파싱 시도
         const text = await res.text().catch(() => "");
+        console.log("[logbook] 오류 응답 내용:", text.slice(0, 300));
         let errMsg: string;
         try {
           const d = JSON.parse(text);
@@ -111,11 +115,11 @@ export default function TripsClient({ trips, pagination, summary, currentParams 
       const cd   = res.headers.get("Content-Disposition") ?? "";
       const match = cd.match(/filename\*=UTF-8''(.+)/i);
       const fn   = match ? decodeURIComponent(match[1]) : "차량운행기록부.xlsx";
-      const url  = URL.createObjectURL(blob);
+      const blobUrl = URL.createObjectURL(blob);
       const a    = document.createElement("a");
-      a.href = url; a.download = fn;
+      a.href = blobUrl; a.download = fn;
       document.body.appendChild(a); a.click();
-      document.body.removeChild(a); URL.revokeObjectURL(url);
+      document.body.removeChild(a); URL.revokeObjectURL(blobUrl);
       setLogbookMsg("운행기록부 다운로드 완료!");
       setTimeout(() => setLogbookMsg(null), 3000);
     } finally {
