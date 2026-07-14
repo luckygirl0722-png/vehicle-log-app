@@ -49,6 +49,17 @@ export async function GET(request: NextRequest) {
   const vehicleId  = sp.get("vehicle_id");
   const monthParam = sp.get("month");
 
+  // ── 진단용 ping (배포 확인) ────────────────────────────────────────────
+  if (sp.get("ping") === "1") {
+    return NextResponse.json({
+      ok: true,
+      v: "2026-07-15-c",
+      env_url:  !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+      env_anon: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      env_svc:  !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    });
+  }
+
   console.log("[logbook] vehicle_id:", vehicleId, "month:", monthParam);
 
   try {
