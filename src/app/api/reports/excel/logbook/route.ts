@@ -267,6 +267,12 @@ export async function GET(request: NextRequest) {
     // V45(s=36,numFmtId=9="0%"): 원시 비율 저장 → Excel이 % 표시
     xml = setNum(xml, "V45", totDist > 0 ? totBiz / totDist : 0);
 
+    // ── 남은 수식 요소 전체 제거 ─────────────────────────────────────────
+    // 데이터 없는 날의 N14+ 셀에 <f t="shared" si="0"/> 같은 고아 참조가 남으면
+    // Excel이 "파일 내용에 문제" 경고를 띄움 → calcChain 제거와 함께 f 태그 전부 삭제
+    xml = xml.replace(/<f\b[^>]*\/>/g, "");               // 자기닫힘: <f t="shared" si="0"/>
+    xml = xml.replace(/<f\b[^>]*>[\s\S]*?<\/f>/g, "");   // 내용 있는: <f>L13-J13</f>
+
     // ── sheet1.xml 저장 + calcChain 완전 제거 ───────────────────────────
     zip.file("xl/worksheets/sheet1.xml", xml);
 
