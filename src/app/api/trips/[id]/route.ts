@@ -103,9 +103,9 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const isAdmin = roleRow?.role === "admin";
 
   if (!isAdmin) {
-    // 운전자: draft·submitted 상태 + 본인 기록만 (승인 완료 후에는 삭제 불가)
-    if (existing.status !== "draft" && existing.status !== "submitted") {
-      return badReq("승인 완료된 기록은 삭제할 수 없습니다.");
+    // 운전자: draft 상태 + 본인 기록만 (제출 후에는 삭제 불가)
+    if (existing.status !== "draft") {
+      return badReq("제출된 기록은 삭제할 수 없습니다. 관리자에게 문의하세요.");
     }
     const { data: myDriver } = await supabase!
       .from("drivers").select("id").eq("user_id", user!.id).single();
