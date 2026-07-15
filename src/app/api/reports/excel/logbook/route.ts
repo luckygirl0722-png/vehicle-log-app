@@ -216,9 +216,10 @@ export async function GET(request: NextRequest) {
     // E3(s=80, numFmtId=14)·G3(s=56, numFmtId=14): Excel 날짜 형식 → date serial 그대로
     xml = setNum(xml, "E3", toSerial(y, mo, 1));
     xml = setNum(xml, "G3", toSerial(y, mo, lastDay));
-    // D7(s=30)·F7(s=37): 텍스트 (테두리만 있는 일반 셀)
-    xml = setStr(xml, "D7", vehicle.model || "—");
-    xml = setStr(xml, "F7", vehicle.plate_number);
+    // 차종: C7:D7 병합 셀 → 최상단 왼쪽(C7)에 값 입력 (s=42, numFmtId=0)
+    // 차량번호: E7:H7 병합 셀 → 최상단 왼쪽(E7)에 값 입력 (s=42, numFmtId=0)
+    xml = setStr(xml, "C7", vehicle.model || "—");
+    xml = setStr(xml, "E7", vehicle.plate_number);
 
     // ── 날짜 행 D13~D43 ───────────────────────────────────────────────────
     // D13(s=12, numFmtId=176="mm/dd/aaa")·D14-D43(s=14, numFmtId=176)
