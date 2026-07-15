@@ -267,18 +267,27 @@ export async function GET(request: NextRequest) {
     // V45(s=36,numFmtId=9="0%"): 원시 비율 저장 → Excel이 % 표시
     xml = setNum(xml, "V45", totDist > 0 ? totBiz / totDist : 0);
 
-    // ── sheet1.xml 저장 + calcChain 제거 ─────────────────────────────────
+    // ── sheet1.xml 저장 + calcChain 완전 제거 ───────────────────────────
     zip.file("xl/worksheets/sheet1.xml", xml);
 
-    // calcChain.xml 제거: 수식을 값으로 교체했으므로 기존 chain은 무효
+    // 1) calcChain.xml 파일 제거
     zip.remove("xl/calcChain.xml");
 
-    // [Content_Types].xml 에서 calcChain 참조 제거 (Excel의 파일 무결성 경고 방지)
+    // 2) [Content_Types].xml 에서 calcChain Override 제거
     const ctFile = zip.file("[Content_Types].xml");
     if (ctFile) {
       let ct = await ctFile.async("string");
       ct = ct.replace(/<Override[^>]*calcChain[^>]*\/>/g, "");
       zip.file("[Content_Types].xml", ct);
+    }
+
+    // 3) xl/_rels/workbook.xml.rels 에서 calcChain Relationship 제거
+    //    ← 이 항목을 제거하지 않으면 Excel이 "파일 내용에 문제가 있습니다" 경고를 표시
+    const wbRelsFile = zip.file("xl/_rels/workbook.xml.rels");
+    if (wbRelsFile) {
+      let rels = await wbRelsFile.async("string");
+      rels = rels.replace(/<Relationship[^>]*calcChain[^>]*\/>/g, "");
+      zip.file("xl/_rels/workbook.xml.rels", rels);
     }
 
     // ── ZIP 생성 및 반환 ──────────────────────────────────────────────────
