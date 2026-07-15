@@ -22,7 +22,7 @@ function toExcelSerial(y: number, mo: number, d: number): number {
 }
 
 /**
- * 셀에 값을 씁니다. 스타일은 건드리지 않고 v/t/z 만 설정.
+ * 셀에 값을 씁니다. 기존 셀의 스타일(s)을 보존하고 v/t/z 만 교체.
  * NaN / null / undefined 숫자 값은 0으로 안전하게 처리.
  */
 function sc(
@@ -37,10 +37,11 @@ function sc(
     const n = Number(v);
     safeV = isNaN(n) ? 0 : n;
   }
-  // 기존 셀의 formula(f)를 제거하고 순수 값 셀로 교체
-  // cellStyles 없이 읽었으므로 style(s) 속성도 없음 → 안전하게 직접 할당
+  const existing = ws[addr];
   const cell: XLSX.CellObject = { v: safeV, t };
   if (z !== undefined) cell.z = z;
+  // 템플릿 셀의 기존 스타일(테두리·색상·폰트) 보존
+  if (existing?.s !== undefined) (cell as XLSX.CellObject & { s: unknown }).s = existing.s;
   ws[addr] = cell;
 }
 
@@ -155,7 +156,8 @@ export async function GET(request: NextRequest) {
     }
 
     // cellFormula:false → 수식(calcChain) 파싱 제거 (31일 달 D43 충돌 방지)
-    const wb = XLSX.read(templateBuf, { type: "buffer", cellFormula: false });
+    // cellStyles:true  → 템플릿 스타일(테두리·색상) 보존
+    const wb = XLSX.read(templateBuf, { type: "buffer", cellFormula: false, cellStyles: true });
     const ws = wb.Sheets[wb.SheetNames[0]];
     const lastDay = new Date(y, mo, 0).getDate();
 
