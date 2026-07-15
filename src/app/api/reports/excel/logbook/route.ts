@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withAuth, badReq, serverErr } from "@/lib/api/auth-guard";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
+import JSZip from "jszip";
 import fs from "fs";
 import path from "path";
 
@@ -9,6 +10,15 @@ import path from "path";
  * GET /api/reports/excel/logbook?vehicle_id=...&month=YYYY-MM
  *
  * 국세청 업무용 승용차 운행기록부 양식에 DB 운행 기록을 채워 반환합니다.
+ *
+ * 서식 보존 방식:
+ *   1. cellStyles:true + cellFormula:false 로 템플릿 읽기
+ *      - cellStyles:true  → 셀의 s 인덱스 보존
+ *      - cellFormula:false → calcChain 제거 (31일 달 D43 충돌 방지)
+ *   2. sc() 헬퍼가 기존 셀의 s 인덱스를 spread로 보존하면서 값만 교체
+ *   3. SheetJS로 xlsx 출력 (cellStyles:true)
+ *   4. JSZip으로 원본 템플릿의 xl/styles.xml + xl/theme/theme1.xml 주입
+ *      → 셀 s 인덱스가 원본 스타일 테이블을 그대로 참조 → 테두리·배경색 복원
  */
 
 const svc = createServiceClient(
@@ -22,8 +32,8 @@ function toExcelSerial(y: number, mo: number, d: number): number {
 }
 
 /**
- * 셀에 값을 씁니다. 기존 셀의 스타일(s)을 보존하고 v/t/z 만 교체.
- * NaN / null / undefined 숫자 값은 0으로 안전하게 처리.
+ * 셀에 값을 쓰되 기존 셀의 스타일 인덱스(s)를 보존한다.
+ * spread로 기존 셀 속성을 유지하고 formula(f)만 제거하여 순수 값 셀로 변환.
  */
 function sc(
   ws: XLSX.WorkSheet,
@@ -32,12 +42,11 @@ function sc(
   t: XLSX.ExcelDataType,
   z?: string
 ): void {
-  let safeV = v;
-  if (t === "n") {
-    const n = Number(v);
-    safeV = isNaN(n) ? 0 : n;
-  }
-  const cell: XLSX.CellObject = { v: safeV, t };
+  const prev = (ws[addr] as XLSX.CellObject | undefined) ?? {};
+  // formula(f) 제거, 나머지(s 인덱스 등) 보존
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { f: _f, ...style } = prev as XLSX.CellObject & { f?: string };
+  const cell: XLSX.CellObject = { ...style, v, t };
   if (z !== undefined) cell.z = z;
   ws[addr] = cell;
 }
@@ -51,14 +60,11 @@ export async function GET(request: NextRequest) {
   if (sp.get("ping") === "1") {
     return NextResponse.json({
       ok: true,
-      v: "2026-07-15-c",
+      v: "2026-07-15-f",
       env_url:  !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-      env_anon: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       env_svc:  !!process.env.SUPABASE_SERVICE_ROLE_KEY,
     });
   }
-
-  console.log("[logbook] vehicle_id:", vehicleId, "month:", monthParam);
 
   try {
     const { error } = await withAuth(true);
@@ -69,8 +75,9 @@ export async function GET(request: NextRequest) {
 
     const [y, mo] = monthParam.split("-").map(Number);
     if (!y || !mo || mo < 1 || mo > 12)
-      return badReq(`month 형식 오류: "${monthParam}" (YYYY-MM 형식 필요)`);
+      return badReq(`month 형식 오류: "${monthParam}"`);
 
+    // ── 차량 정보 ─────────────────────────────────────────────────────────
     const { data: vehicle, error: vErr } = await svc
       .from("vehicles")
       .select("plate_number, model")
@@ -79,8 +86,7 @@ export async function GET(request: NextRequest) {
     if (vErr || !vehicle)
       return badReq(`차량을 찾을 수 없습니다. (vehicle_id: ${vehicleId})`);
 
-    console.log("[logbook] 차량:", vehicle.plate_number, y, "년", mo, "월");
-
+    // ── 운행 기록 조회 (해당 월 KST 기준) ────────────────────────────────
     const KST_MS     = 9 * 60 * 60 * 1000;
     const monthStart = new Date(Date.UTC(y, mo - 1, 1) - KST_MS).toISOString();
     const monthEnd   = new Date(Date.UTC(y, mo,     1) - KST_MS).toISOString();
@@ -100,8 +106,7 @@ export async function GET(request: NextRequest) {
       .order("departure_time", { ascending: true });
     if (tErr) return serverErr(`DB 조회 오류: ${tErr.message}`);
 
-    console.log("[logbook] 조회된 운행 건수:", trips?.length ?? 0);
-
+    // ── 일별 집계 ─────────────────────────────────────────────────────────
     interface DayAgg {
       depKm: number; arrKm: number; commuteKm: number;
       bizKm: number; personalKm: number; tollFee: number;
@@ -138,12 +143,13 @@ export async function GET(request: NextRequest) {
       else if (trip.trip_type === "개인사용")  agg.personalKm += dist;
       else                                    agg.bizKm      += dist;
       agg.tollFee += Number(trip.toll_fee) || 0;
+
       const driverObj = trip.drivers as unknown as { name?: string } | { name?: string }[] | null;
       const name = Array.isArray(driverObj) ? driverObj[0]?.name : driverObj?.name;
       if (name) agg.drivers.add(name);
     }
 
-    // ── 템플릿 읽기 (cellStyles 없이 — 스타일 인덱스 충돌 방지) ─────────
+    // ── 템플릿 읽기 ───────────────────────────────────────────────────────
     const templatePath = path.join(process.cwd(), "public", "차량운행기록부_양식.xlsx");
     let templateBuf: Buffer;
     try {
@@ -152,33 +158,37 @@ export async function GET(request: NextRequest) {
       return serverErr(`템플릿 파일 읽기 실패: ${e instanceof Error ? e.message : e}`);
     }
 
+    // cellStyles:true  → 셀 s 인덱스 보존 (sc()에서 spread로 유지)
     // cellFormula:false → calcChain 제거 (31일 달 D43 충돌 방지)
-    // cellStyles 미설정  → SheetJS가 styles.xml 원본 그대로 보존 (재생성 X → 서식 유지)
-    const wb = XLSX.read(templateBuf, { type: "buffer", cellFormula: false });
+    const wb = XLSX.read(templateBuf, {
+      type: "buffer",
+      cellStyles: true,
+      cellFormula: false,
+    });
     const ws = wb.Sheets[wb.SheetNames[0]];
     const lastDay = new Date(y, mo, 0).getDate();
 
-    // 기간 헤더
+    // 날짜 포맷을 템플릿 D13 셀에서 가져오기 (없으면 기본값)
+    const dateFmt = (ws["D13"]?.z as string | undefined) ?? "mm/dd/aaa";
+
+    // ── 헤더: 기간·차량 정보 ──────────────────────────────────────────────
     sc(ws, "E3", toExcelSerial(y, mo, 1),       "n", "yyyy-mm-dd");
     sc(ws, "G3", toExcelSerial(y, mo, lastDay), "n", "yyyy-mm-dd");
-    // 차량 정보
     sc(ws, "D7", vehicle.model || "—", "s");
     sc(ws, "F7", vehicle.plate_number,  "s");
 
-    // 날짜 행 (D13 ~ D43)
-    const dateFmt = "mm/dd/aaa";
+    // ── 날짜 행 (D13 ~ D43) ───────────────────────────────────────────────
     for (let d = 1; d <= 31; d++) {
       const r = 12 + d;
       if (d <= lastDay) {
         sc(ws, `D${r}`, toExcelSerial(y, mo, d), "n", dateFmt);
       } else {
-        // 해당 월에 없는 날짜 행 비우기
-        ws[`D${r}`] = { v: "", t: "s" };
-        ws[`N${r}`] = { v: "", t: "s" };
+        sc(ws, `D${r}`, "", "s");
+        sc(ws, `N${r}`, "", "s");
       }
     }
 
-    // 운행 데이터 채우기
+    // ── 데이터 행 입력 ────────────────────────────────────────────────────
     for (const [day, agg] of dayMap) {
       if (day < 1 || day > 31) continue;
       const r = 12 + day;
@@ -193,7 +203,7 @@ export async function GET(request: NextRequest) {
       if (agg.tollFee    > 0) sc(ws, `V${r}`, agg.tollFee,    "n", "#,##0");
     }
 
-    // 합계 행 (45행)
+    // ── 합계 행 (45행) ────────────────────────────────────────────────────
     let totDist = 0, totBiz = 0, totPer = 0;
     for (const agg of dayMap.values()) {
       totDist += agg.arrKm - agg.depKm;
@@ -209,8 +219,37 @@ export async function GET(request: NextRequest) {
     );
 
     // ── SheetJS 출력 ──────────────────────────────────────────────────────
-    const finalBuf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
-    console.log("[logbook] Excel 생성 완료. 버퍼 크기:", finalBuf?.length);
+    const outputBuf = XLSX.write(wb, {
+      type: "buffer", bookType: "xlsx", cellStyles: true,
+    }) as Buffer;
+
+    // ── JSZip으로 원본 스타일 주입 ────────────────────────────────────────
+    // SheetJS가 styles.xml을 재생성하면 서식이 손실될 수 있으므로
+    // 원본 템플릿의 xl/styles.xml, xl/theme/theme1.xml 을 그대로 복사
+    let finalBuf: Buffer;
+    try {
+      const [templateZip, outputZip] = await Promise.all([
+        JSZip.loadAsync(templateBuf),
+        JSZip.loadAsync(outputBuf),
+      ]);
+
+      for (const xmlPath of ["xl/styles.xml", "xl/theme/theme1.xml"]) {
+        const file = templateZip.file(xmlPath);
+        if (file) {
+          outputZip.file(xmlPath, await file.async("uint8array"));
+        }
+      }
+
+      finalBuf = await outputZip.generateAsync({
+        type:               "nodebuffer",
+        compression:        "DEFLATE",
+        compressionOptions: { level: 6 },
+      }) as Buffer;
+    } catch (e) {
+      // JSZip 실패 시 스타일 없는 버전이라도 반환
+      console.error("[logbook] JSZip style injection failed:", e);
+      finalBuf = outputBuf;
+    }
 
     const period  = `${y}년${mo}월`;
     const fname   = `차량운행기록부_${vehicle.plate_number}_${period}.xlsx`;
@@ -224,7 +263,6 @@ export async function GET(request: NextRequest) {
     });
 
   } catch (err) {
-    // 1차 catch: 오류 메시지를 평문으로 추출
     let safeMsg = "unknown error";
     try {
       safeMsg = err instanceof Error
@@ -234,11 +272,10 @@ export async function GET(request: NextRequest) {
 
     console.error("[logbook] CATCH:", safeMsg);
 
-    // 2차 try: JSON 직렬화가 실패해도 plain text로 응답
     try {
       return NextResponse.json(
         { error: `서버 오류[${monthParam ?? "?"}]: ${safeMsg}` },
-        { status: 200 }   // ← 진단용 200 (Edge 오류 페이지 방지)
+        { status: 200 }
       );
     } catch {
       return new Response(`CATCH_FAIL: ${safeMsg}`, {
