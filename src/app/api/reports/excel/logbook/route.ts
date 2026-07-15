@@ -37,11 +37,8 @@ function sc(
     const n = Number(v);
     safeV = isNaN(n) ? 0 : n;
   }
-  const existing = ws[addr];
   const cell: XLSX.CellObject = { v: safeV, t };
   if (z !== undefined) cell.z = z;
-  // 템플릿 셀의 기존 스타일(테두리·색상·폰트) 보존
-  if (existing?.s !== undefined) (cell as XLSX.CellObject & { s: unknown }).s = existing.s;
   ws[addr] = cell;
 }
 
@@ -155,9 +152,9 @@ export async function GET(request: NextRequest) {
       return serverErr(`템플릿 파일 읽기 실패: ${e instanceof Error ? e.message : e}`);
     }
 
-    // cellFormula:false → 수식(calcChain) 파싱 제거 (31일 달 D43 충돌 방지)
-    // cellStyles:true  → 템플릿 스타일(테두리·색상) 보존
-    const wb = XLSX.read(templateBuf, { type: "buffer", cellFormula: false, cellStyles: true });
+    // cellFormula:false → calcChain 제거 (31일 달 D43 충돌 방지)
+    // cellStyles 미설정  → SheetJS가 styles.xml 원본 그대로 보존 (재생성 X → 서식 유지)
+    const wb = XLSX.read(templateBuf, { type: "buffer", cellFormula: false });
     const ws = wb.Sheets[wb.SheetNames[0]];
     const lastDay = new Date(y, mo, 0).getDate();
 
