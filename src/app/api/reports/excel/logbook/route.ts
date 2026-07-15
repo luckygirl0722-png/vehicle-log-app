@@ -154,7 +154,8 @@ export async function GET(request: NextRequest) {
       return serverErr(`템플릿 파일 읽기 실패: ${e instanceof Error ? e.message : e}`);
     }
 
-    const wb = XLSX.read(templateBuf, { type: "buffer" });
+    // cellFormula:false → 수식(calcChain) 파싱 제거 (31일 달 D43 충돌 방지)
+    const wb = XLSX.read(templateBuf, { type: "buffer", cellFormula: false });
     const ws = wb.Sheets[wb.SheetNames[0]];
     const lastDay = new Date(y, mo, 0).getDate();
 
