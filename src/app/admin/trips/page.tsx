@@ -50,9 +50,7 @@ export default async function AdminTripsPage({ searchParams }: Props) {
   if (searchParams.driver_id)  query = query.eq("driver_id", searchParams.driver_id);
   if (searchParams.status)     query = query.eq("status", searchParams.status);
 
-  const { data: trips, count } = await query;
-
-  // 요약 집계 (필터 동일 조건)
+  // 요약 집계 쿼리 (trips 쿼리와 병렬 실행용으로 미리 빌드)
   let summaryQuery = supabase
     .from("trip_logs")
     .select("distance_km, toll_fee, status");
@@ -67,18 +65,24 @@ export default async function AdminTripsPage({ searchParams }: Props) {
   if (searchParams.driver_id)  summaryQuery = summaryQuery.eq("driver_id", searchParams.driver_id);
   if (searchParams.status)     summaryQuery = summaryQuery.eq("status", searchParams.status);
 
-  const { data: summaryRows } = await summaryQuery;
+  // trips + summary + vehicles + drivers — 4개 쿼리 동시 실행
+  const [
+    { data: trips, count },
+    { data: summaryRows },
+    { data: vehicles },
+    { data: drivers },
+  ] = await Promise.all([
+    query,
+    summaryQuery,
+    supabase.from("vehicles").select("id, plate_number").eq("is_active", true).order("plate_number"),
+    supabase.from("drivers").select("id, name, employee_no").eq("is_active", true).order("name"),
+  ]);
+
   const summary = {
     totalDistance:  summaryRows?.reduce((s, t) => s + (t.distance_km ?? 0), 0) ?? 0,
     totalToll:      summaryRows?.reduce((s, t) => s + (t.toll_fee ?? 0), 0) ?? 0,
     submittedCount: summaryRows?.filter(t => t.status === "submitted").length ?? 0,
   };
-
-  // 필터 옵션용 차량·운전자 목록
-  const [{ data: vehicles }, { data: drivers }] = await Promise.all([
-    supabase.from("vehicles").select("id, plate_number").eq("is_active", true).order("plate_number"),
-    supabase.from("drivers").select("id, name, employee_no").eq("is_active", true).order("name"),
-  ]);
 
   const total      = count ?? 0;
   const totalPages = Math.ceil(total / limit);

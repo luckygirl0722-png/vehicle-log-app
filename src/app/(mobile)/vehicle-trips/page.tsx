@@ -1,19 +1,25 @@
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import { Fragment } from "react";
+import dynamic from "next/dynamic";
+import TripActionButtons from "../my-trips/_components/TripActionButtons";
+import BulkSubmitSection from "../my-trips/_components/BulkSubmitSection";
 
-// 서비스 롤 클라이언트 — 모듈 레벨 싱글턴 (요청마다 재생성 방지)
+// xlsx 라이브러리를 포함하는 ExcelUploadSection — 모바일 번들에서 제외
+const ExcelUploadSection = dynamic(
+  () => import("./_components/ExcelUploadSection"),
+  { ssr: false, loading: () => null }
+);
+
+export const metadata = { title: "차량 기록 — 차량 운행일지" };
+
+// 서비스 롤 클라이언트 싱글턴 (요청마다 재생성 방지)
 const adminClient = createServiceClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
-import { redirect } from "next/navigation";
-import Link from "next/link";
-import { Fragment } from "react";
-import TripActionButtons from "../my-trips/_components/TripActionButtons";
-import BulkSubmitSection from "../my-trips/_components/BulkSubmitSection";
-import ExcelUploadSection from "./_components/ExcelUploadSection";
-
-export const metadata = { title: "차량 기록 — 차량 운행일지" };
 
 type Props = { searchParams: { vehicle_id?: string; month?: string } };
 
@@ -37,25 +43,60 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
+  // ── 날짜 계산 (DB 쿼리 전에 미리) ──
+  const now           = new Date();
+  const selectedMonth = searchParams.month
+    ? new Date(searchParams.month + "-01")
+    : new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthStart    = selectedMonth.toISOString();
+  const monthEnd      = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1).toISOString();
+  const prevMonth     = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() - 1, 1);
+  const nextMonth     = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1);
+  const prevParam     = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, "0")}`;
+  const nextParam     = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}`;
+  const monthLabel    = selectedMonth.toLocaleDateString("ko-KR", { year: "numeric", month: "long" });
+  const candidateVehicleId = searchParams.vehicle_id ?? "";
+
+  // ── Round 1: driver 조회 ──
   const { data: driver } = await supabase
     .from("drivers").select("id, name").eq("user_id", user.id).maybeSingle();
 
-  const { data: assignedRows } = driver
-    ? await supabase.from("vehicle_drivers").select("vehicle_id").eq("driver_id", driver.id)
-    : { data: [] };
+  // ── Round 2: 배정 차량 목록 + trips 병렬 조회 ──
+  // vehicle_drivers + vehicles 를 join 한 번으로 처리 (2 round trip → 1)
+  // candidateVehicleId 가 URL에 있으면 trips도 함께 선조회
+  const [assignmentRes, earlyTripsRes] = driver
+    ? await Promise.all([
+        supabase
+          .from("vehicle_drivers")
+          .select("vehicle_id, vehicles(id, plate_number, model, purpose, is_active)")
+          .eq("driver_id", driver.id),
+        candidateVehicleId
+          ? adminClient
+              .from("trip_logs")
+              .select(`
+                id, departure_time, arrival_time, departure_location, arrival_location,
+                departure_km, arrival_km, distance_km, toll_fee, status, purpose, trip_type,
+                driver_id, drivers(id, name)
+              `)
+              .eq("vehicle_id", candidateVehicleId)
+              .gte("departure_time", monthStart)
+              .lt("departure_time", monthEnd)
+              .order("departure_time", { ascending: false })
+          : Promise.resolve({ data: null, error: null }),
+      ])
+    : [{ data: [] as any[], error: null }, { data: null, error: null }];
 
-  const assignedIds = (assignedRows ?? []).map(r => r.vehicle_id);
+  // 배정 차량 목록 추출
+  const assignments = assignmentRes.data ?? [];
+  const assignedIds = assignments.map((r: any) => r.vehicle_id as string);
+  const vehicles = assignments
+    .map((r: any) => r.vehicles)
+    .filter((v: any): v is { id: string; plate_number: string; model: string; purpose: string } =>
+      v != null && v.is_active === true
+    )
+    .sort((a: any, b: any) => a.plate_number.localeCompare(b.plate_number));
 
-  const { data: vehicles } = assignedIds.length > 0
-    ? await supabase
-        .from("vehicles")
-        .select("id, plate_number, model, purpose")
-        .eq("is_active", true)
-        .in("id", assignedIds)
-        .order("plate_number")
-    : { data: [] };
-
-  if (!vehicles?.length) {
+  if (!vehicles.length) {
     return (
       <div className="p-6 text-center space-y-3">
         <p className="text-2xl">🚗</p>
@@ -65,48 +106,31 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
     );
   }
 
-  const selectedVehicleId = searchParams.vehicle_id ?? vehicles[0]?.id ?? "";
-  const selectedVehicle   = vehicles.find(v => v.id === selectedVehicleId);
-  if (selectedVehicleId && !selectedVehicle) {
-    redirect(`/vehicle-trips?vehicle_id=${vehicles[0].id}`);
-  }
+  // 보안 검증: URL vehicle_id 가 배정 목록에 없으면 첫 번째 차량으로
+  const selectedVehicleId = assignedIds.includes(candidateVehicleId)
+    ? candidateVehicleId
+    : vehicles[0]?.id ?? "";
+  const selectedVehicle = vehicles.find((v: any) => v.id === selectedVehicleId);
 
-  const now          = new Date();
-  const selectedMonth = searchParams.month
-    ? new Date(searchParams.month + "-01")
-    : new Date(now.getFullYear(), now.getMonth(), 1);
-
-  const monthStart   = selectedMonth.toISOString();
-  const monthEnd     = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1).toISOString();
-  const prevMonth    = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() - 1, 1);
-  const nextMonth    = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1);
-  const prevParam    = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, "0")}`;
-  const nextParam    = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}`;
-  const monthLabel   = selectedMonth.toLocaleDateString("ko-KR", { year: "numeric", month: "long" });
-
-  // ── 서비스 롤로 차량 전체 운전자 기록 조회 (RLS 우회) ──
-  const { data: trips } = selectedVehicleId
-    ? await adminClient
-        .from("trip_logs")
-        .select(`
-          id, departure_time, arrival_time, departure_location, arrival_location,
-          departure_km, arrival_km, distance_km, toll_fee, status, purpose, trip_type,
-          driver_id,
-          drivers(id, name)
-        `)
-        .eq("vehicle_id", selectedVehicleId)
-        .gte("departure_time", monthStart)
-        .lt("departure_time", monthEnd)
-        .order("departure_time", { ascending: false })
-    : { data: null };
-
-  // ── 월 집계 (완료된 기록만, BulkSubmitSection용) ──
-  const completed = (trips ?? []).filter(t => t.arrival_time);
+  // trips: URL vehicle_id 와 실제 선택 차량이 같으면 earlyTrips 재사용, 아니면 별도 조회
+  const trips = selectedVehicleId
+    ? (selectedVehicleId === candidateVehicleId && earlyTripsRes.data !== null
+        ? earlyTripsRes.data
+        : (await adminClient
+            .from("trip_logs")
+            .select(`
+              id, departure_time, arrival_time, departure_location, arrival_location,
+              departure_km, arrival_km, distance_km, toll_fee, status, purpose, trip_type,
+              driver_id, drivers(id, name)
+            `)
+            .eq("vehicle_id", selectedVehicleId)
+            .gte("departure_time", monthStart)
+            .lt("departure_time", monthEnd)
+            .order("departure_time", { ascending: false })
+          ).data)
+    : null;
 
   // ── 미입력 구간 탐지 (km 기반 정렬) ──
-  // 시간 순서와 무관하게 departure_km 오름차순으로 정렬 후 km 연속성 체크
-  // → 소급 입력된 기록이 오늘 날짜로 저장되어도 km 기준으로 갭이 채워졌는지 정확히 판단
-  // 화면은 시간 내림차순이므로, 갭은 "높은 km 카드(화면 위쪽)" 바로 아래에 표시
   const gapAfterTrip = new Map<string, GapInfo>();
   if (trips) {
     const kmSorted = [...trips]
@@ -114,15 +138,14 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
       .sort((a, b) => (a.departure_km ?? 0) - (b.departure_km ?? 0));
 
     for (let i = 0; i < kmSorted.length - 1; i++) {
-      const lower  = kmSorted[i];      // 낮은 km (화면에서 아래쪽)
-      const higher = kmSorted[i + 1];  // 높은 km (화면에서 위쪽)
+      const lower  = kmSorted[i];
+      const higher = kmSorted[i + 1];
       if (
         lower.arrival_km   != null &&
         higher.departure_km != null &&
         lower.arrival_km   !== higher.departure_km &&
         higher.departure_km > lower.arrival_km
       ) {
-        // 화면 표시 순서에서 higher 카드 바로 아래에 갭 카드 삽입
         gapAfterTrip.set(higher.id, {
           fromKm: lower.arrival_km,
           toKm:   higher.departure_km,
@@ -134,7 +157,7 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
 
   const gapCount = gapAfterTrip.size;
 
-  // ── 내 미제출 draft 기록만 BulkSubmitSection에 전달 ──
+  // 내 미제출 draft 기록 (BulkSubmitSection)
   const submitableDrafts = (trips ?? [])
     .filter(t => t.status === "draft" && t.arrival_time !== null && t.driver_id === driver?.id)
     .map(t => ({
@@ -159,7 +182,7 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
 
       {/* 차량 선택 탭 */}
       <div className="flex gap-2 px-4 pt-3 pb-2 overflow-x-auto">
-        {vehicles.map(v => (
+        {vehicles.map((v: any) => (
           <Link key={v.id}
             href={`/vehicle-trips?vehicle_id=${v.id}${searchParams.month ? `&month=${searchParams.month}` : ""}`}
             className={`shrink-0 rounded-full px-4 py-2 text-sm font-medium border transition-colors
@@ -171,7 +194,7 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
         ))}
       </div>
 
-      {/* 공유 차량 안내 */}
+      {/* 공유 차량 미입력 구간 알림 */}
       {gapCount > 0 && (
         <div className="mx-4 mb-2 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 flex items-center gap-2">
           <span className="text-sm shrink-0">⚠️</span>
@@ -179,11 +202,11 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
         </div>
       )}
 
-      {/* Excel 업로드 (PC 전용 — md: 이상에서만 렌더됨) */}
+      {/* Excel 업로드 (PC 전용 — dynamic import로 모바일 번들 제외) */}
       {selectedVehicle && (
         <ExcelUploadSection
           vehicleId={selectedVehicleId}
-          vehiclePlate={selectedVehicle.plate_number}
+          vehiclePlate={(selectedVehicle as any).plate_number}
         />
       )}
 
@@ -204,7 +227,6 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
             const badgeCls   = TYPE_BADGE[tripType] ?? TYPE_BADGE["업무"];
             const statusInfo = STATUS_LABEL[trip.status] ?? STATUS_LABEL.draft;
             const isMyTrip   = trip.driver_id === driver?.id;
-            // @ts-ignore – supabase join
             const driverName: string = (trip.drivers as any)?.name ?? "알 수 없음";
             const gap = gapAfterTrip.get(trip.id);
 
