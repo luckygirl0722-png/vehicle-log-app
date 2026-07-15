@@ -224,11 +224,27 @@ export async function GET(request: NextRequest) {
     });
 
   } catch (err) {
-    const msg = err instanceof Error ? `${err.name}: ${err.message}\n${(err as Error).stack ?? ""}` : String(err);
-    console.error("[logbook API] 서버 오류:", msg);
-    return NextResponse.json(
-      { error: `서버 오류[${monthParam}]: ${msg.slice(0, 300)}` },
-      { status: 500 }
-    );
+    // 1차 catch: 오류 메시지를 평문으로 추출
+    let safeMsg = "unknown error";
+    try {
+      safeMsg = err instanceof Error
+        ? `${err.name}: ${err.message}`
+        : String(err).slice(0, 200);
+    } catch { safeMsg = "msg_extraction_failed"; }
+
+    console.error("[logbook] CATCH:", safeMsg);
+
+    // 2차 try: JSON 직렬화가 실패해도 plain text로 응답
+    try {
+      return NextResponse.json(
+        { error: `서버 오류[${monthParam ?? "?"}]: ${safeMsg}` },
+        { status: 200 }   // ← 진단용 200 (Edge 오류 페이지 방지)
+      );
+    } catch {
+      return new Response(`CATCH_FAIL: ${safeMsg}`, {
+        status: 200,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    }
   }
 }
