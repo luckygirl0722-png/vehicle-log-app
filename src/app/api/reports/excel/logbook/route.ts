@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAuth, badReq, serverErr } from "@/lib/api/auth-guard";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
-import * as XLSX from "xlsx";
 import JSZip from "jszip";
 import fs from "fs";
 import path from "path";
@@ -11,14 +10,10 @@ import path from "path";
  *
  * 국세청 업무용 승용차 운행기록부 양식에 DB 운행 기록을 채워 반환합니다.
  *
- * 서식 보존 방식:
- *   1. cellStyles:true + cellFormula:false 로 템플릿 읽기
- *      - cellStyles:true  → 셀의 s 인덱스 보존
- *      - cellFormula:false → calcChain 제거 (31일 달 D43 충돌 방지)
- *   2. sc() 헬퍼가 기존 셀의 s 인덱스를 spread로 보존하면서 값만 교체
- *   3. SheetJS로 xlsx 출력 (cellStyles:true)
- *   4. JSZip으로 원본 템플릿의 xl/styles.xml + xl/theme/theme1.xml 주입
- *      → 셀 s 인덱스가 원본 스타일 테이블을 그대로 참조 → 테두리·배경색 복원
+ * ★ 서식 보존 방식 (v2 — 순수 JSZip XML 조작):
+ *   SheetJS를 사용하지 않고 JSZip으로 sheet1.xml을 직접 수정합니다.
+ *   → styles.xml, theme1.xml, sharedStrings.xml 등 서식 파일이 원본 그대로 유지
+ *   → s 인덱스 재번호매김 없음 → 테두리·배경색·요일 하이라이트 100% 보존
  */
 
 const svc = createServiceClient(
@@ -26,43 +21,92 @@ const svc = createServiceClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-/** JS UTC 날짜 → Excel 날짜 시리얼 */
-function toExcelSerial(y: number, mo: number, d: number): number {
+// ── Excel 날짜 시리얼 계산 ─────────────────────────────────────────────────
+function toSerial(y: number, mo: number, d: number): number {
+  // Excel: 1900-01-01 = 1 (25569 offset from Unix epoch)
   return Math.floor(Date.UTC(y, mo - 1, d) / 86400000) + 25569;
 }
 
-/**
- * 셀에 값을 쓰되 기존 셀의 스타일 인덱스(s)를 보존한다.
- * spread로 기존 셀 속성을 유지하고 formula(f)만 제거하여 순수 값 셀로 변환.
- */
-function sc(
-  ws: XLSX.WorkSheet,
-  addr: string,
-  v: XLSX.CellObject["v"],
-  t: XLSX.ExcelDataType,
-  z?: string
-): void {
-  const prev = (ws[addr] as XLSX.CellObject | undefined) ?? {};
-  // formula(f) 제거, 나머지(s 인덱스 등) 보존
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { f: _f, ...style } = prev as XLSX.CellObject & { f?: string };
-  const cell: XLSX.CellObject = { ...style, v, t };
-  if (z !== undefined) cell.z = z;
-  ws[addr] = cell;
+// ── XML 특수문자 이스케이프 ────────────────────────────────────────────────
+function xe(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// ── 속성에서 t="..." 제거 ─────────────────────────────────────────────────
+function rmT(attrs: string): string {
+  return attrs.replace(/ t="[^"]*"/, "");
+}
+
+/**
+ * sheet1.xml 에서 특정 셀에 숫자 값 설정 (s 인덱스 보존)
+ *
+ * - content 있는 셀: 수식(f) + 기존값 제거, t 속성 제거, <v>val</v> 교체
+ * - 자기닫힘 셀: <v>val</v> 삽입
+ * - (?<!/) negative lookbehind: /> (자기닫힘) 과 > (내용 있는 셀) 을 구별
+ */
+function setNum(xml: string, ref: string, val: number): string {
+  const r = ref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // content 셀: > 앞에 / 없음
+  const reC = new RegExp(`<c r="${r}"([^>]*)(?<![/])>[\\s\\S]*?</c>`);
+  const mC  = reC.exec(xml);
+  if (mC) {
+    return xml.replace(mC[0], `<c r="${ref}"${rmT(mC[1])}><v>${val}</v></c>`);
+  }
+  // 자기닫힘
+  return xml.replace(
+    new RegExp(`<c r="${r}"([^/]*)/>`, "g"),
+    (_, a) => `<c r="${ref}"${a}><v>${val}</v></c>`
+  );
+}
+
+/**
+ * sheet1.xml 에서 특정 셀에 인라인 문자열 설정 (s 인덱스 보존)
+ * t="inlineStr", <is><t>val</t></is>
+ */
+function setStr(xml: string, ref: string, val: string): string {
+  const r = ref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const v = xe(val);
+  const make = (a: string) =>
+    `<c r="${ref}"${rmT(a)} t="inlineStr"><is><t>${v}</t></is></c>`;
+  const reC = new RegExp(`<c r="${r}"([^>]*)(?<![/])>[\\s\\S]*?</c>`);
+  const mC  = reC.exec(xml);
+  if (mC) {
+    return xml.replace(mC[0], make(mC[1]));
+  }
+  return xml.replace(
+    new RegExp(`<c r="${r}"([^/]*)/>`, "g"),
+    (_, a) => make(a)
+  );
+}
+
+/**
+ * sheet1.xml 에서 특정 셀을 빈 자기닫힘으로 교체 (s 보존, v/f 제거)
+ * 해당 월보다 날짜가 큰 행(예: 2월의 29~31행)을 비울 때 사용
+ */
+function clearCell(xml: string, ref: string): string {
+  const r = ref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const reC = new RegExp(`<c r="${r}"([^>]*)(?<![/])>[\\s\\S]*?</c>`);
+  const mC  = reC.exec(xml);
+  if (mC) {
+    return xml.replace(mC[0], `<c r="${ref}"${rmT(mC[1])}/>`);
+  }
+  return xml; // 이미 자기닫힘이면 그대로
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function GET(request: NextRequest) {
-  const sp = new URL(request.url).searchParams;
+  const sp         = new URL(request.url).searchParams;
   const vehicleId  = sp.get("vehicle_id");
   const monthParam = sp.get("month");
 
-  // ── 진단용 ping (배포 확인) ────────────────────────────────────────────
+  // ── 진단용 ping ───────────────────────────────────────────────────────────
   if (sp.get("ping") === "1") {
     return NextResponse.json({
-      ok: true,
-      v: "2026-07-15-f",
-      env_url:  !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-      env_svc:  !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      ok:      true,
+      v:       "2026-07-15-g",
+      env_url: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+      env_svc: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
     });
   }
 
@@ -108,18 +152,22 @@ export async function GET(request: NextRequest) {
 
     // ── 일별 집계 ─────────────────────────────────────────────────────────
     interface DayAgg {
-      depKm: number; arrKm: number; commuteKm: number;
-      bizKm: number; personalKm: number; tollFee: number;
-      drivers: Set<string>; arrLoc: string;
+      depKm:      number;
+      arrKm:      number;
+      commuteKm:  number;
+      bizKm:      number;
+      personalKm: number;
+      tollFee:    number;
+      drivers:    Set<string>;
+      arrLoc:     string;
     }
     const dayMap = new Map<number, DayAgg>();
 
     for (const trip of trips ?? []) {
-      const kstDate = new Date(trip.departure_time).toLocaleString("en-CA", {
+      const kstStr  = new Date(trip.departure_time).toLocaleString("en-CA", {
         timeZone: "Asia/Seoul",
       });
-      const datePart = kstDate.split(",")[0].trim();
-      const day = parseInt(datePart.split("-")[2], 10);
+      const day = parseInt(kstStr.split(",")[0].trim().split("-")[2], 10);
       if (isNaN(day) || day < 1 || day > 31) continue;
 
       const depKm = Number(trip.departure_km) || 0;
@@ -132,127 +180,114 @@ export async function GET(request: NextRequest) {
           drivers: new Set<string>(), arrLoc: trip.arrival_location || "",
         });
       } else {
-        const agg  = dayMap.get(day)!;
-        agg.arrKm  = arrKm;
-        agg.arrLoc = trip.arrival_location || agg.arrLoc;
+        const a   = dayMap.get(day)!;
+        a.arrKm   = arrKm;
+        a.arrLoc  = trip.arrival_location || a.arrLoc;
       }
 
-      const agg  = dayMap.get(day)!;
-      const dist = Number(trip.distance_km) || 0;
-      if      (trip.trip_type === "출퇴근")   agg.commuteKm  += dist;
-      else if (trip.trip_type === "개인사용")  agg.personalKm += dist;
-      else                                    agg.bizKm      += dist;
-      agg.tollFee += Number(trip.toll_fee) || 0;
+      const a  = dayMap.get(day)!;
+      const km = Number(trip.distance_km) || 0;
+      if      (trip.trip_type === "출퇴근")   a.commuteKm  += km;
+      else if (trip.trip_type === "개인사용")  a.personalKm += km;
+      else                                    a.bizKm      += km;
+      a.tollFee += Number(trip.toll_fee) || 0;
 
-      const driverObj = trip.drivers as unknown as { name?: string } | { name?: string }[] | null;
-      const name = Array.isArray(driverObj) ? driverObj[0]?.name : driverObj?.name;
-      if (name) agg.drivers.add(name);
+      const dObj = trip.drivers as unknown as { name?: string } | { name?: string }[] | null;
+      const name = Array.isArray(dObj) ? dObj[0]?.name : dObj?.name;
+      if (name) a.drivers.add(name);
     }
 
-    // ── 템플릿 읽기 ───────────────────────────────────────────────────────
-    const templatePath = path.join(process.cwd(), "public", "차량운행기록부_양식.xlsx");
-    let templateBuf: Buffer;
+    // ── 템플릿 JSZip 로드 ─────────────────────────────────────────────────
+    const tplPath = path.join(process.cwd(), "public", "차량운행기록부_양식.xlsx");
+    let tplBuf: Buffer;
     try {
-      templateBuf = fs.readFileSync(templatePath);
+      tplBuf = fs.readFileSync(tplPath);
     } catch (e) {
       return serverErr(`템플릿 파일 읽기 실패: ${e instanceof Error ? e.message : e}`);
     }
 
-    // cellStyles:true  → 셀 s 인덱스 보존 (sc()에서 spread로 유지)
-    // cellFormula:false → calcChain 제거 (31일 달 D43 충돌 방지)
-    const wb = XLSX.read(templateBuf, {
-      type: "buffer",
-      cellStyles: true,
-      cellFormula: false,
-    });
-    const ws = wb.Sheets[wb.SheetNames[0]];
+    const zip    = await JSZip.loadAsync(tplBuf);
+    const sheetF = zip.file("xl/worksheets/sheet1.xml");
+    if (!sheetF) return serverErr("템플릿 sheet1.xml을 찾을 수 없습니다.");
+    let xml       = await sheetF.async("string");
     const lastDay = new Date(y, mo, 0).getDate();
 
-    // 날짜 포맷을 템플릿 D13 셀에서 가져오기 (없으면 기본값)
-    const dateFmt = (ws["D13"]?.z as string | undefined) ?? "mm/dd/aaa";
-
     // ── 헤더: 기간·차량 정보 ──────────────────────────────────────────────
-    sc(ws, "E3", toExcelSerial(y, mo, 1),       "n", "yyyy-mm-dd");
-    sc(ws, "G3", toExcelSerial(y, mo, lastDay), "n", "yyyy-mm-dd");
-    sc(ws, "D7", vehicle.model || "—", "s");
-    sc(ws, "F7", vehicle.plate_number,  "s");
+    // E3(s=80, numFmtId=14)·G3(s=56, numFmtId=14): Excel 날짜 형식 → date serial 그대로
+    xml = setNum(xml, "E3", toSerial(y, mo, 1));
+    xml = setNum(xml, "G3", toSerial(y, mo, lastDay));
+    // D7(s=30)·F7(s=37): 텍스트 (테두리만 있는 일반 셀)
+    xml = setStr(xml, "D7", vehicle.model || "—");
+    xml = setStr(xml, "F7", vehicle.plate_number);
 
-    // ── 날짜 행 (D13 ~ D43) ───────────────────────────────────────────────
+    // ── 날짜 행 D13~D43 ───────────────────────────────────────────────────
+    // D13(s=12, numFmtId=176="mm/dd/aaa")·D14-D43(s=14, numFmtId=176)
     for (let d = 1; d <= 31; d++) {
-      const r = 12 + d;
+      const row = 12 + d;
       if (d <= lastDay) {
-        sc(ws, `D${r}`, toExcelSerial(y, mo, d), "n", dateFmt);
+        xml = setNum(xml, `D${row}`, toSerial(y, mo, d));
       } else {
-        sc(ws, `D${r}`, "", "s");
-        sc(ws, `N${r}`, "", "s");
+        // 해당 월보다 큰 날짜 행: 날짜·거리 셀 비우기
+        xml = clearCell(xml, `D${row}`);
+        xml = clearCell(xml, `N${row}`);
       }
     }
 
     // ── 데이터 행 입력 ────────────────────────────────────────────────────
-    for (const [day, agg] of dayMap) {
+    for (const [day, a] of dayMap) {
       if (day < 1 || day > 31) continue;
-      const r = 12 + day;
-      if (agg.drivers.size) sc(ws, `G${r}`, [...agg.drivers].join(", "), "s");
-      if (agg.arrLoc)       sc(ws, `I${r}`, agg.arrLoc, "s");
-      sc(ws, `J${r}`, agg.depKm,             "n", "#,##0");
-      sc(ws, `L${r}`, agg.arrKm,             "n", "#,##0");
-      sc(ws, `N${r}`, agg.arrKm - agg.depKm, "n", "#,##0");
-      if (agg.commuteKm  > 0) sc(ws, `P${r}`, agg.commuteKm,  "n", "#,##0");
-      if (agg.bizKm      > 0) sc(ws, `R${r}`, agg.bizKm,      "n", "#,##0");
-      if (agg.personalKm > 0) sc(ws, `T${r}`, agg.personalKm, "n", "#,##0");
-      if (agg.tollFee    > 0) sc(ws, `V${r}`, agg.tollFee,    "n", "#,##0");
+      const row = 12 + day;
+      // G: 운전자명(s=55,numFmtId=0)  I: 도착지(s=93,numFmtId=0)
+      if (a.drivers.size) xml = setStr(xml, `G${row}`, [...a.drivers].join(", "));
+      if (a.arrLoc)       xml = setStr(xml, `I${row}`, a.arrLoc);
+      // J: 출발km(s=71,numFmtId=41=#,##0)  L: 도착km(s=72)
+      xml = setNum(xml, `J${row}`, a.depKm);
+      xml = setNum(xml, `L${row}`, a.arrKm);
+      // N: 운행거리(s=67,numFmtId=0)
+      xml = setNum(xml, `N${row}`, a.arrKm - a.depKm);
+      // P: 출퇴근km(s=54)  R: 업무km(s=55)  T: 개인사용km(s=55)  V: 통행료(s=13,numFmtId=41)
+      if (a.commuteKm  > 0) xml = setNum(xml, `P${row}`, a.commuteKm);
+      if (a.bizKm      > 0) xml = setNum(xml, `R${row}`, a.bizKm);
+      if (a.personalKm > 0) xml = setNum(xml, `T${row}`, a.personalKm);
+      if (a.tollFee    > 0) xml = setNum(xml, `V${row}`, a.tollFee);
     }
 
-    // ── 합계 행 (45행) ────────────────────────────────────────────────────
+    // ── 합계 행 45 ────────────────────────────────────────────────────────
     let totDist = 0, totBiz = 0, totPer = 0;
-    for (const agg of dayMap.values()) {
-      totDist += agg.arrKm - agg.depKm;
-      totBiz  += agg.bizKm + agg.commuteKm;
-      totPer  += agg.personalKm;
+    for (const a of dayMap.values()) {
+      totDist += a.arrKm - a.depKm;
+      totBiz  += a.bizKm + a.commuteKm;
+      totPer  += a.personalKm;
     }
-    sc(ws, "J45", totDist, "n", "#,##0");
-    sc(ws, "P45", totBiz,  "n", "#,##0");
-    sc(ws, "T45", totPer,  "n", "#,##0");
-    sc(ws, "V45",
-      totDist > 0 ? Math.round((totBiz / totDist) * 1000) / 10 : 0,
-      "n", "0.0"
-    );
+    // J45(s=38,numFmtId=41)  P45(s=38)  T45(s=52)
+    xml = setNum(xml, "J45", totDist);
+    xml = setNum(xml, "P45", totBiz);
+    xml = setNum(xml, "T45", totPer);
+    // V45(s=36,numFmtId=9="0%"): 원시 비율 저장 → Excel이 % 표시
+    xml = setNum(xml, "V45", totDist > 0 ? totBiz / totDist : 0);
 
-    // ── SheetJS 출력 ──────────────────────────────────────────────────────
-    const outputBuf = XLSX.write(wb, {
-      type: "buffer", bookType: "xlsx", cellStyles: true,
+    // ── sheet1.xml 저장 + calcChain 제거 ─────────────────────────────────
+    zip.file("xl/worksheets/sheet1.xml", xml);
+
+    // calcChain.xml 제거: 수식을 값으로 교체했으므로 기존 chain은 무효
+    zip.remove("xl/calcChain.xml");
+
+    // [Content_Types].xml 에서 calcChain 참조 제거 (Excel의 파일 무결성 경고 방지)
+    const ctFile = zip.file("[Content_Types].xml");
+    if (ctFile) {
+      let ct = await ctFile.async("string");
+      ct = ct.replace(/<Override[^>]*calcChain[^>]*\/>/g, "");
+      zip.file("[Content_Types].xml", ct);
+    }
+
+    // ── ZIP 생성 및 반환 ──────────────────────────────────────────────────
+    const finalBuf = await zip.generateAsync({
+      type:               "nodebuffer",
+      compression:        "DEFLATE",
+      compressionOptions: { level: 6 },
     }) as Buffer;
 
-    // ── JSZip으로 원본 스타일 주입 ────────────────────────────────────────
-    // SheetJS가 styles.xml을 재생성하면 서식이 손실될 수 있으므로
-    // 원본 템플릿의 xl/styles.xml, xl/theme/theme1.xml 을 그대로 복사
-    let finalBuf: Buffer;
-    try {
-      const [templateZip, outputZip] = await Promise.all([
-        JSZip.loadAsync(templateBuf),
-        JSZip.loadAsync(outputBuf),
-      ]);
-
-      for (const xmlPath of ["xl/styles.xml", "xl/theme/theme1.xml"]) {
-        const file = templateZip.file(xmlPath);
-        if (file) {
-          outputZip.file(xmlPath, await file.async("uint8array"));
-        }
-      }
-
-      finalBuf = await outputZip.generateAsync({
-        type:               "nodebuffer",
-        compression:        "DEFLATE",
-        compressionOptions: { level: 6 },
-      }) as Buffer;
-    } catch (e) {
-      // JSZip 실패 시 스타일 없는 버전이라도 반환
-      console.error("[logbook] JSZip style injection failed:", e);
-      finalBuf = outputBuf;
-    }
-
-    const period  = `${y}년${mo}월`;
-    const fname   = `차량운행기록부_${vehicle.plate_number}_${period}.xlsx`;
+    const fname   = `차량운행기록부_${vehicle.plate_number}_${y}년${mo}월.xlsx`;
     const encoded = encodeURIComponent(fname);
 
     return new NextResponse(finalBuf, {
