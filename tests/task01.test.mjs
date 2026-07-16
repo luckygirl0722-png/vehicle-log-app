@@ -63,7 +63,7 @@ const REQUIRED_FILES = [
   ".prettierrc",
   "components.json",
   ".gitignore",
-  "SETUP.md",
+  "01_SETUP.md",
   "public/manifest.json",
   "src/app/layout.tsx",
   "src/app/page.tsx",
