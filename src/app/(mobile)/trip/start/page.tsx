@@ -1,6 +1,13 @@
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import TripStartForm from "./_components/TripStartForm";
+
+// 서비스 롤 클라이언트 — RLS 우회용 (차량의 마지막 도착km 조회 시 타 운전자 기록 포함)
+const adminClient = createServiceClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export const metadata = { title: "운행 시작 - 차량 운행일지" };
 
@@ -53,12 +60,13 @@ export default async function TripStartPage() {
 
   // 차량별 마지막 도착km + 최근 출발지 — 병렬 조회
   const [{ data: lastTrips }, { data: recentLocs }] = await Promise.all([
-    supabase
+    // ★ adminClient(서비스 롤)로 RLS 우회 → 타 운전자 포함 차량의 실제 마지막 도착km 조회
+    adminClient
       .from("trip_logs").select("vehicle_id, arrival_km")
-      .in("vehicle_id", assignedIds)         // 배정 차량만 (풀 테이블 스캔 방지)
+      .in("vehicle_id", assignedIds)
       .not("arrival_km", "is", null)
       .order("departure_time", { ascending: false })
-      .limit(assignedIds.length * 3 + 5),    // 차량당 최근 3건이면 충분
+      .limit(assignedIds.length * 5 + 10),
     supabase
       .from("trip_logs").select("departure_location")
       .eq("driver_id", driver.id)
