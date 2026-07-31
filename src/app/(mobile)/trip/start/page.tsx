@@ -61,11 +61,12 @@ export default async function TripStartPage() {
   // 차량별 마지막 도착km + 최근 출발지 — 병렬 조회
   const [{ data: lastTrips }, { data: recentLocs }] = await Promise.all([
     // ★ adminClient(서비스 롤)로 RLS 우회 → 타 운전자 포함 차량의 실제 마지막 도착km 조회
+    // arrival_km 내림차순 정렬: 소급 입력(departure_time이 과거)된 기록이 있어도 항상 최대 km를 가져옴
     adminClient
       .from("trip_logs").select("vehicle_id, arrival_km")
       .in("vehicle_id", assignedIds)
       .not("arrival_km", "is", null)
-      .order("departure_time", { ascending: false })
+      .order("arrival_km", { ascending: false })
       .limit(assignedIds.length * 5 + 10),
     supabase
       .from("trip_logs").select("departure_location")
