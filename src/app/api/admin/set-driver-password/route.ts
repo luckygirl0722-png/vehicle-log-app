@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { withAuth, ok, badReq, serverErr } from "@/lib/api/auth-guard";
+import { writeAudit } from "@/lib/audit";
 
 /**
  * POST /api/admin/set-driver-password
@@ -8,7 +9,7 @@ import { withAuth, ok, badReq, serverErr } from "@/lib/api/auth-guard";
  * body: { driver_id, email, password }
  */
 export async function POST(request: NextRequest) {
-  const { error } = await withAuth(true);
+  const { user, error } = await withAuth(true);
   if (error) return error;
 
   let body: { driver_id?: string; email?: string; password?: string };
@@ -65,6 +66,15 @@ export async function POST(request: NextRequest) {
     await adminClient
       .from("user_roles")
       .upsert({ user_id: userId, role: "driver" }, { onConflict: "user_id" });
+
+    // 비밀번호·이메일은 기록하지 않음
+    await writeAudit({
+      userId:   user!.id,
+      action:   isNew ? "driver.account_create" : "driver.password_reset",
+      table:    "drivers",
+      recordId: driver_id,
+      detail:   { target_user_id: userId, force_change_on_login: true },
+    });
 
     return ok({
       message: isNew

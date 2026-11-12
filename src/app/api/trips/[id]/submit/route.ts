@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { withAuth, ok, badReq, notFound, serverErr } from "@/lib/api/auth-guard";
 import { sendSubmitNotification, getAdminEmails } from "@/lib/email/send";
+import { writeAudit } from "@/lib/audit";
 
 type Params = { params: { id: string } };
 
@@ -48,6 +49,22 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
     .single();
 
   if (dbErr || !data) return serverErr(dbErr?.message ?? "제출 실패");
+
+  await writeAudit({
+    userId:   user!.id,
+    action:   "trip.submit",
+    table:    "trip_logs",
+    recordId: params.id,
+    detail: {
+      status:      { before: trip.status, after: "submitted" },
+      by_admin:    roleRow?.role === "admin",
+      vehicle_id:  trip.vehicle_id,
+      driver_id:   trip.driver_id,
+      departure_km: trip.departure_km,
+      arrival_km:  trip.arrival_km,
+      distance_km: trip.distance_km,
+    },
+  });
 
   // 이메일 알림 (fire-and-forget — 실패해도 제출 결과에 영향 없음)
   getAdminEmails(supabase!).then(adminEmails => {

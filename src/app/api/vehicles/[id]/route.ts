@@ -1,8 +1,15 @@
 import { NextRequest } from "next/server";
 import { withAuth, ok, badReq, notFound, serverErr } from "@/lib/api/auth-guard";
 import { VehicleUpdateSchema } from "@/lib/validations/vehicle";
+import { writeAudit, diffFields } from "@/lib/audit";
 
 type Params = { params: { id: string } };
+
+/** 감사 로그에 전/후 값을 남기는 vehicles 필드 */
+const VEHICLE_AUDIT_KEYS = [
+  "plate_number", "model", "purpose", "is_active", "ownership_type", "status",
+  "rental_company", "contract_start", "contract_end", "disposed_date",
+] as const;
 
 export async function GET(_req: NextRequest, { params }: Params) {
   const { supabase, error } = await withAuth(false);
@@ -16,7 +23,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const { supabase, error } = await withAuth(true);
+  const { supabase, user, error } = await withAuth(true);
   if (error) return error;
 
   let body: unknown;
@@ -33,6 +40,10 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     update.is_active = parsed.data.status === "운행중";
     if (parsed.data.status === "운행중") update.disposed_date = null;
   }
+
+  // 감사 로그용 변경 전 값
+  const { data: before } = await supabase!
+    .from("vehicles").select("*").eq("id", params.id).maybeSingle();
 
   const { data, error: dbErr } = await supabase!
     .from("vehicles").update(update).eq("id", params.id).select().single();
@@ -54,6 +65,18 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .is("end_date", null);
   }
 
+  const statusChanged = !!parsed.data.status && before?.status !== parsed.data.status;
+  await writeAudit({
+    userId:   user!.id,
+    action:   statusChanged ? "vehicle.status_change" : "vehicle.update",
+    table:    "vehicles",
+    recordId: params.id,
+    detail: {
+      plate_number: data.plate_number,
+      changes: diffFields(before ?? {}, update, VEHICLE_AUDIT_KEYS),
+    },
+  });
+
   return ok(data);
 }
 
@@ -63,8 +86,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
  * - 연결된 운행 기록(trip_logs, approvals)까지 모두 삭제 후 차량 삭제
  */
 export async function DELETE(_req: NextRequest, { params }: Params) {
-  const { supabase, error } = await withAuth(true);
+  const { supabase, user, error } = await withAuth(true);
   if (error) return error;
+
+  // 감사 로그용 삭제 전 차량 정보
+  const { data: vehicle } = await supabase!
+    .from("vehicles").select("plate_number, model, status").eq("id", params.id).maybeSingle();
 
   // 1) approvals 삭제 (trip_logs 참조, CASCADE로 자동 삭제되지만 명시적으로)
   const { data: tripIds } = await supabase!
@@ -84,6 +111,19 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const { error: vErr } = await supabase!
     .from("vehicles").delete().eq("id", params.id);
   if (vErr) return serverErr("차량 삭제 실패: " + vErr.message);
+
+  await writeAudit({
+    userId:   user!.id,
+    action:   "vehicle.delete",
+    table:    "vehicles",
+    recordId: params.id,
+    detail: {
+      plate_number:       vehicle?.plate_number ?? null,
+      model:              vehicle?.model ?? null,
+      status:             vehicle?.status ?? null,
+      deleted_trip_count: tripIds?.length ?? 0,
+    },
+  });
 
   return ok({ message: "차량과 운행 기록이 모두 삭제되었습니다." });
 }

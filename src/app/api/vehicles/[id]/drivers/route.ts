@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { withAuth, ok, badReq, serverErr } from "@/lib/api/auth-guard";
+import { writeAudit } from "@/lib/audit";
 
 type Ctx = { params: { id: string } };
 
@@ -40,7 +41,7 @@ export async function GET(_req: NextRequest, { params }: Ctx) {
  * body: { driver_id: string, start_date?: "YYYY-MM-DD", priority?: number, note?: string }
  */
 export async function POST(request: NextRequest, { params }: Ctx) {
-  const { supabase, error } = await withAuth(true);
+  const { supabase, user, error } = await withAuth(true);
   if (error) return error;
 
   const { driver_id, start_date, priority, note } = await request.json().catch(() => ({}));
@@ -66,6 +67,19 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     note: note || null,
   });
 
+  await writeAudit({
+    userId:   user!.id,
+    action:   "vehicle_driver.assign",
+    table:    "vehicle_drivers",
+    recordId: data?.id ?? null,
+    detail: {
+      vehicle_id: params.id,
+      driver_id,
+      start_date: start_date || todayKst(),
+      priority:   row.priority ?? null,
+    },
+  });
+
   return ok(data, 201);
 }
 
@@ -75,13 +89,20 @@ export async function POST(request: NextRequest, { params }: Ctx) {
  * body: { driver_id: string, priority: number }
  */
 export async function PATCH(request: NextRequest, { params }: Ctx) {
-  const { supabase, error } = await withAuth(true);
+  const { supabase, user, error } = await withAuth(true);
   if (error) return error;
 
   const { driver_id, priority } = await request.json().catch(() => ({}));
   if (!driver_id) return badReq("driver_id가 필요합니다.");
   if (!Number.isInteger(priority) || priority < 1 || priority > 9)
     return badReq("우선순위는 1~9 사이 정수입니다.");
+
+  const { data: before } = await supabase!
+    .from("vehicle_drivers")
+    .select("id, priority")
+    .eq("vehicle_id", params.id)
+    .eq("driver_id", driver_id)
+    .maybeSingle();
 
   const { error: dbErr } = await supabase!
     .from("vehicle_drivers")
@@ -90,6 +111,19 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     .eq("driver_id", driver_id);
 
   if (dbErr) return serverErr(dbErr.message);
+
+  await writeAudit({
+    userId:   user!.id,
+    action:   "vehicle_driver.priority_change",
+    table:    "vehicle_drivers",
+    recordId: before?.id ?? null,
+    detail: {
+      vehicle_id: params.id,
+      driver_id,
+      priority: { before: before?.priority ?? null, after: priority },
+    },
+  });
+
   return ok({ success: true });
 }
 
@@ -99,7 +133,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
  * body: { driver_id: string, end_date?: "YYYY-MM-DD", note?: string }
  */
 export async function DELETE(request: NextRequest, { params }: Ctx) {
-  const { supabase, error } = await withAuth(true);
+  const { supabase, user, error } = await withAuth(true);
   if (error) return error;
 
   const { driver_id, end_date, note } = await request.json().catch(() => ({}));
@@ -122,6 +156,13 @@ export async function DELETE(request: NextRequest, { params }: Ctx) {
     .eq("vehicle_id", params.id)
     .eq("driver_id", driver_id)
     .is("end_date", null);
+
+  await writeAudit({
+    userId: user!.id,
+    action: "vehicle_driver.unassign",
+    table:  "vehicle_drivers",
+    detail: { vehicle_id: params.id, driver_id, end_date: upd.end_date },
+  });
 
   return ok({ success: true });
 }

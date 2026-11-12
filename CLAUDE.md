@@ -272,7 +272,7 @@ CREATE POLICY "audit_logs: 관리자만 조회"
 | EXT_43 | 최초 로그인 비밀번호 강제 변경 (user_metadata 기반) | ✅ 완료 |
 | EXT_44 | 비밀번호 입력 눈 아이콘 토글 (Eye/EyeOff) | ✅ 완료 |
 | EXT_45 | 관리자 비번 초기화 시 password_changed=false 리셋 | ✅ 완료 |
-| EXT_46 | audit_logs 테이블 추가 — SQL 제공 완료 | 🟡 SQL 실행 대기 |
+| EXT_46 | audit_logs 테이블 추가 — SQL 실행 완료 (2026-11-12) | ✅ 완료 |
 
 ### Phase 9 — UI·기능 개선 (2026-06-23)
 
@@ -306,6 +306,11 @@ CREATE POLICY "audit_logs: 관리자만 조회"
 | EXT_109 | 차량 소유구분(자가/렌트/리스)·상태(운행중/매각/반납/폐차)·계약일·처분일 | ✅ 완료 |
 | EXT_110 | 차량 사용자 변경 이력 (vehicle_driver_history) — 배정/해제 기준일 기록 | ✅ 완료 |
 | EXT_111 | `003_vehicle_status_priority_history.sql` Supabase SQL Editor 실행 | ✅ 완료 (2026-11-12) |
+| EXT_112 | audit_logs 기록 연동 — `src/lib/audit.ts` `writeAudit()` (service role insert, 실패해도 본 요청 영향 없음) | ✅ 완료 |
+
+- EXT_112 기록 대상: 운행 수정·삭제·제출·승인·반려, 차량 수정·상태변경·삭제, 운전자 배정·해제·순위변경, 운전자 계정생성·비밀번호 초기화
+- 미연동(후보): `trips/bulk`(Excel 업로드), `trips/complete`(소급입력), `admin/monthly-closings`(월 마감), `drivers`·`drivers/[id]`, `vehicles` POST·`vehicles/bulk`
+- detail 에 장소·목적·비고·이메일·비밀번호는 넣지 않음 (개인정보)
 
 - 신규 API: `PATCH /api/vehicles/[id]/drivers`(순위), `GET /api/vehicles/[id]/history`, `PATCH /api/me/preferred-vehicle`
 - 운행시작 차량 정렬: ① 운전자 주 사용 차량(★) → ② 관리자 순위 → ③ 차량번호
@@ -323,7 +328,7 @@ CREATE POLICY "audit_logs: 관리자만 조회"
 | 비밀번호 입력 눈 아이콘 | ✅ | Eye/EyeOff |
 | 관리자 비번 초기화 → 재강제 | ✅ | password_changed=false 리셋 |
 | 관리자 모든 상태 기록 삭제 | ✅ | service role RLS 우회 |
-| audit_logs 테이블 | 🟡 SQL 대기 | Supabase SQL Editor 실행 필요 |
+| audit_logs 테이블 | ✅ | 2026-11-12 생성 + 주요 API 기록 연동 (EXT_112) |
 | scripts/ gitignore | ⬜ | bulk-set-passwords.mjs 보호 |
 | approved 기록 삭제 방지 RLS | ⬜ | 세무자료 보호 고려 |
 

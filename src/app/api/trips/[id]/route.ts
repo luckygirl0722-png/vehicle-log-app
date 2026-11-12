@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { withAuth, ok, badReq, notFound, serverErr } from "@/lib/api/auth-guard";
 import { TripUpdateSchema } from "@/lib/validations/trip";
+import { writeAudit, diffFields } from "@/lib/audit";
 
 type Params = { params: { id: string } };
 
@@ -80,8 +81,30 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     .single();
 
   if (dbErr || !data) return serverErr(dbErr?.message ?? "수정 실패");
+
+  await writeAudit({
+    userId:   user!.id,
+    action:   "trip.update",
+    table:    "trip_logs",
+    recordId: params.id,
+    detail: {
+      vehicle_id: existing.vehicle_id,
+      driver_id:  existing.driver_id,
+      status:     existing.status,
+      by_admin:   roleRow?.role === "admin",
+      // 장소·목적·비고는 자택 주소 등 개인정보가 섞일 수 있어 값 대신 변경 여부만 기록
+      changed_fields: Object.keys(parsed.data),
+      changes: diffFields(existing, parsed.data, TRIP_AUDIT_KEYS),
+    },
+  });
+
   return ok(data);
 }
+
+/** 감사 로그에 전/후 값을 남기는 trip_logs 필드 (장소·목적·비고 제외) */
+const TRIP_AUDIT_KEYS = [
+  "departure_time", "departure_km", "arrival_time", "arrival_km", "trip_type", "toll_fee",
+] as const;
 
 /**
  * DELETE /api/trips/[id]
@@ -128,5 +151,25 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     .from("trip_logs").delete().eq("id", params.id);
 
   if (dbErr) return serverErr(dbErr.message);
+
+  await writeAudit({
+    userId:   user!.id,
+    action:   "trip.delete",
+    table:    "trip_logs",
+    recordId: params.id,
+    detail: {
+      by_admin:       isAdmin,
+      vehicle_id:     existing.vehicle_id,
+      driver_id:      existing.driver_id,
+      status:         existing.status,
+      trip_type:      existing.trip_type,
+      departure_time: existing.departure_time,
+      departure_km:   existing.departure_km,
+      arrival_km:     existing.arrival_km,
+      distance_km:    existing.distance_km,
+      toll_fee:       existing.toll_fee,
+    },
+  });
+
   return ok({ message: "운행 기록이 삭제되었습니다." });
 }

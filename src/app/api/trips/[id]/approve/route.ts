@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { withAuth, ok, badReq, notFound, serverErr } from "@/lib/api/auth-guard";
 import { sendApprovalNotification, getDriverEmail } from "@/lib/email/send";
+import { writeAudit } from "@/lib/audit";
 
 const ApproveSchema = z.object({
   action:  z.enum(["approved", "rejected"], {
@@ -62,6 +63,20 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (tripUpdate.error || !tripUpdate.data) {
     return serverErr(tripUpdate.error?.message ?? "상태 업데이트 실패");
   }
+
+  await writeAudit({
+    userId:   user!.id,
+    action:   action === "approved" ? "trip.approve" : "trip.reject",
+    table:    "trip_logs",
+    recordId: params.id,
+    detail: {
+      status:      { before: trip.status, after: action },
+      vehicle_id:  trip.vehicle_id,
+      driver_id:   trip.driver_id,
+      distance_km: trip.distance_km,
+      has_comment: !!comment,
+    },
+  });
 
   // 이메일 알림 (fire-and-forget)
   getDriverEmail(supabase!, trip.driver_id).then(driverEmail => {
