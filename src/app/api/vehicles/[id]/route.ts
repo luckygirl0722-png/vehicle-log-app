@@ -27,10 +27,33 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (!parsed.success) return badReq(parsed.error.errors[0]?.message ?? "입력값이 올바르지 않습니다.");
   if (Object.keys(parsed.data).length === 0) return badReq("수정할 항목이 없습니다.");
 
-  const { data, error: dbErr } = await supabase!
-    .from("vehicles").update(parsed.data).eq("id", params.id).select().single();
+  // 상태 ↔ is_active 동기화: 운행중이 아니면(매각·반납·폐차) 운전자 앱에서 숨김
+  const update: Record<string, unknown> = { ...parsed.data };
+  if (parsed.data.status) {
+    update.is_active = parsed.data.status === "운행중";
+    if (parsed.data.status === "운행중") update.disposed_date = null;
+  }
 
-  if (dbErr || !data) return notFound("차량을 찾을 수 없습니다.");
+  const { data, error: dbErr } = await supabase!
+    .from("vehicles").update(update).eq("id", params.id).select().single();
+
+  if (dbErr || !data) {
+    if (dbErr && /column .* does not exist/i.test(dbErr.message))
+      return serverErr("DB 마이그레이션(003)이 아직 적용되지 않았습니다. Supabase SQL Editor에서 실행해 주세요.");
+    return notFound("차량을 찾을 수 없습니다.");
+  }
+
+  // 매각·반납·폐차 처리 시: 진행 중인 사용자 이력 종료 (배정은 유지 → 과거 기록 조회 가능)
+  if (parsed.data.status && parsed.data.status !== "운행중") {
+    const endDate = parsed.data.disposed_date
+      ?? new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+    await supabase!
+      .from("vehicle_driver_history")
+      .update({ end_date: endDate, note: `차량 ${parsed.data.status}` })
+      .eq("vehicle_id", params.id)
+      .is("end_date", null);
+  }
+
   return ok(data);
 }
 

@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { kstMonthRange, kstYearRange } from "@/lib/utils";
 import { withAuth, ok, created, badReq, serverErr } from "@/lib/api/auth-guard";
 import { TripStartSchema, TripListQuerySchema } from "@/lib/validations/trip";
 
@@ -43,12 +44,10 @@ export async function GET(request: NextRequest) {
 
   // 월별 필터
   if (year && month) {
-    const from = new Date(year, month - 1, 1).toISOString();
-    const to   = new Date(year, month, 1).toISOString();
+    const { from, to } = kstMonthRange(year, month);
     query = query.gte("departure_time", from).lt("departure_time", to);
   } else if (year) {
-    const from = new Date(year, 0, 1).toISOString();
-    const to   = new Date(year + 1, 0, 1).toISOString();
+    const { from, to } = kstYearRange(year);
     query = query.gte("departure_time", from).lt("departure_time", to);
   }
 

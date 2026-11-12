@@ -53,7 +53,7 @@ export default function RecentTrips({ trips }: RecentTripsProps) {
                 <span>·</span>
                 <span>{trip.drivers?.name ?? "—"}</span>
                 <span>·</span>
-                <span>{dep.toLocaleDateString("ko-KR", { month: "short", day: "numeric" })}</span>
+                <span>{dep.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "short", day: "numeric" })}</span>
                 {trip.distance_km !== null && (
                   <><span>·</span><span>{trip.distance_km.toLocaleString("ko-KR")} km</span></>
                 )}

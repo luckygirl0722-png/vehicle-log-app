@@ -20,6 +20,12 @@ export default async function TripStartPage() {
 
   const { data: driver } = await supabase
     .from("drivers").select("id, name").eq("user_id", user.id).single();
+
+  // 주 사용 차량 (003 마이그레이션 컬럼 — 미적용 시 null)
+  const { data: prefRow } = driver
+    ? await adminClient.from("drivers").select("preferred_vehicle_id").eq("id", driver.id).maybeSingle()
+    : { data: null };
+  const preferredVehicleId: string | null = (prefRow as any)?.preferred_vehicle_id ?? null;
   if (!driver) {
     return (
       <div className="p-6 text-center space-y-3">
@@ -35,21 +41,36 @@ export default async function TripStartPage() {
   if (activeTrip) redirect(`/trip/${activeTrip.id}/end`);
 
   // 본인에게 배정된 차량만 조회 (vehicle_drivers 기준)
-  const { data: assignedVehicleRows } = await supabase
+  // 우선순위(priority) 포함 조회 — 003 마이그레이션 전이면 priority 없이 재조회
+  let { data: assignedVehicleRows, error: vdErr } = await supabase
     .from("vehicle_drivers")
-    .select("vehicle_id")
+    .select("vehicle_id, priority")
     .eq("driver_id", driver.id);
+  if (vdErr) {
+    ({ data: assignedVehicleRows } = await supabase
+      .from("vehicle_drivers").select("vehicle_id").eq("driver_id", driver.id) as any);
+  }
+  const priorityMap: Record<string, number> = {};
+  (assignedVehicleRows ?? []).forEach((r: any) => { priorityMap[r.vehicle_id] = r.priority ?? 1; });
 
   const assignedIds = (assignedVehicleRows ?? []).map(r => r.vehicle_id);
 
   // 배정된 차량만 표시 (배정 없으면 빈 목록 → 안내 메시지)
-  const { data: vehicles } = assignedIds.length > 0
+  const { data: vehiclesRaw } = assignedIds.length > 0
     ? await supabase
         .from("vehicles").select("id, plate_number, model")
         .eq("is_active", true).in("id", assignedIds).order("plate_number")
     : { data: [] };
 
-  if (!vehicles?.length) {
+  // 정렬: ① 운전자 지정 주 사용 차량 → ② 관리자 우선순위 → ③ 차량번호
+  const vehicles = (vehiclesRaw ?? []).slice().sort((a, b) => {
+    if (a.id === preferredVehicleId) return -1;
+    if (b.id === preferredVehicleId) return 1;
+    const pa = priorityMap[a.id] ?? 99, pb = priorityMap[b.id] ?? 99;
+    return pa !== pb ? pa - pb : a.plate_number.localeCompare(b.plate_number);
+  });
+
+  if (!vehicles.length) {
     return (
       <div className="p-6 text-center space-y-3">
         <p className="text-lg font-semibold">배정된 차량이 없습니다</p>
@@ -59,15 +80,21 @@ export default async function TripStartPage() {
   }
 
   // 차량별 마지막 도착km + 최근 출발지 — 병렬 조회
-  const [{ data: lastTrips }, { data: recentLocs }] = await Promise.all([
+  const [lastTrips, { data: recentLocs }] = await Promise.all([
     // ★ adminClient(서비스 롤)로 RLS 우회 → 타 운전자 포함 차량의 실제 마지막 도착km 조회
-    // arrival_km 내림차순 정렬: 소급 입력(departure_time이 과거)된 기록이 있어도 항상 최대 km를 가져옴
-    adminClient
-      .from("trip_logs").select("vehicle_id, arrival_km")
-      .in("vehicle_id", assignedIds)
-      .not("arrival_km", "is", null)
-      .order("arrival_km", { ascending: false })
-      .limit(assignedIds.length * 5 + 10),
+    // 차량별로 각각 최대 arrival_km 1건 조회 (2026-11 수정)
+    //  - 이전: 전체 차량을 한 번에 arrival_km 내림차순 + limit → km가 큰 차량(예: 9만km) 기록이
+    //    상위를 모두 차지해 신규 차량(예: 173km)은 결과에 포함되지 않아 자동입력 누락
+    Promise.all(assignedIds.map(vid =>
+      adminClient
+        .from("trip_logs").select("vehicle_id, arrival_km")
+        .eq("vehicle_id", vid)
+        .not("arrival_km", "is", null)
+        .order("arrival_km", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+        .then(r => r.data)
+    )),
     supabase
       .from("trip_logs").select("departure_location")
       .eq("driver_id", driver.id)
@@ -77,8 +104,8 @@ export default async function TripStartPage() {
   ]);
 
   const lastKmMap: Record<string, number> = {};
-  lastTrips?.forEach(t => {
-    if (t.vehicle_id && t.arrival_km !== null && !(t.vehicle_id in lastKmMap))
+  lastTrips.forEach(t => {
+    if (t && t.vehicle_id && t.arrival_km !== null && !(t.vehicle_id in lastKmMap))
       lastKmMap[t.vehicle_id] = t.arrival_km;
   });
 
@@ -91,7 +118,7 @@ export default async function TripStartPage() {
         <h2 className="text-xl font-bold">운행 시작</h2>
         <p className="text-sm text-muted-foreground mt-1">{driver.name} 님, 출발 정보를 입력해 주세요</p>
       </div>
-      <TripStartForm vehicles={vehicles} driver={driver} lastKmMap={lastKmMap} quickLocations={quickLocations} />
+      <TripStartForm vehicles={vehicles} driver={driver} lastKmMap={lastKmMap} quickLocations={quickLocations} preferredVehicleId={preferredVehicleId} />
     </div>
   );
 }

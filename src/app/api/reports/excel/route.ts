@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { kstMonthRange } from "@/lib/utils";
 import { withAuth, badReq, serverErr } from "@/lib/api/auth-guard";
 import {
   generateTripLogExcel,
@@ -38,8 +39,7 @@ export async function GET(request: NextRequest) {
   if (isNaN(month) || month < 1 || month > 12)   return badReq("month는 1~12 사이여야 합니다.");
 
   // 월 범위
-  const from = new Date(year, month - 1, 1).toISOString();
-  const to   = new Date(year, month, 1).toISOString();
+  const { from, to } = kstMonthRange(year, month);
 
   // 운행 기록 조회 (approved + submitted 포함)
   let tripQuery = supabase!

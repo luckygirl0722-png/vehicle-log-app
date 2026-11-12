@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { kstMonthRange } from "@/lib/utils";
 import { withAuth, badReq, serverErr } from "@/lib/api/auth-guard";
 import {
   generateTripLogPdf,
@@ -34,8 +35,7 @@ export async function GET(request: NextRequest) {
   if (isNaN(year)  || year < 2020 || year > 2100) return badReq("year가 올바르지 않습니다.");
   if (isNaN(month) || month < 1   || month > 12)  return badReq("month는 1~12 사이여야 합니다.");
 
-  const from = new Date(year, month - 1, 1).toISOString();
-  const to   = new Date(year, month, 1).toISOString();
+  const { from, to } = kstMonthRange(year, month);
 
   let query = supabase!
     .from("trip_logs")

@@ -47,9 +47,14 @@ export async function POST(request: NextRequest) {
     return badReq(parsed.error.errors[0]?.message ?? "입력값이 올바르지 않습니다.");
   }
 
+  const insertRow = {
+    ...parsed.data,
+    ...(parsed.data.status ? { is_active: parsed.data.status === "운행중" } : {}),
+  };
+
   const { data, error: dbErr } = await supabase!
     .from("vehicles")
-    .insert(parsed.data)
+    .insert(insertRow)
     .select()
     .single();
 

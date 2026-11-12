@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { kstMonthRange, kstNow } from "@/lib/utils";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import BulkSubmitSection from "./_components/BulkSubmitSection";
@@ -32,13 +33,12 @@ export default async function MyTripsPage({ searchParams }: Props) {
     return <div className="p-6 text-center text-muted-foreground">운전자 등록이 필요합니다.</div>;
   }
 
-  const now = new Date();
+  const now = kstNow(); // 로컬 필드 = KST
   const selectedMonth = searchParams.month
     ? new Date(searchParams.month + "-01")
     : new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const monthStart = selectedMonth.toISOString();
-  const monthEnd   = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1).toISOString();
+  const { from: monthStart, to: monthEnd } = kstMonthRange(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1);
   const monthLabel = selectedMonth.toLocaleDateString("ko-KR", { year: "numeric", month: "long" });
   const prevMonth  = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() - 1, 1);
   const nextMonth  = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1);

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { kstMonthRange } from "@/lib/utils";
 import { withAuth, badReq, serverErr } from "@/lib/api/auth-guard";
 import * as XLSX from "xlsx";
 
@@ -35,8 +36,8 @@ export async function GET(request: NextRequest) {
   if (monthParam) {
     const [y, m] = monthParam.split("-").map(Number);
     query = query
-      .gte("departure_time", new Date(y, m - 1, 1).toISOString())
-      .lt("departure_time",  new Date(y, m,     1).toISOString());
+      .gte("departure_time", kstMonthRange(y, m).from)
+      .lt("departure_time",  kstMonthRange(y, m).to);
   }
   if (vehicleId) query = query.eq("vehicle_id", vehicleId);
   if (driverId)  query = query.eq("driver_id", driverId);

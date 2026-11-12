@@ -17,7 +17,18 @@ interface VehicleModalProps {
   vehicle?: Vehicle | null; // null = 신규 등록, Vehicle = 수정
 }
 
-const INITIAL = { plate_number: "", model: "", purpose: "영업용" as const, note: "" };
+type Ownership = "자가" | "렌트" | "리스";
+type Status    = "운행중" | "매각" | "반납" | "폐차";
+
+const INITIAL = {
+  plate_number: "", model: "", purpose: "영업용" as "영업용" | "업무용", note: "",
+  ownership_type: "자가" as Ownership,
+  status:         "운행중" as Status,
+  rental_company: "",
+  contract_start: "",
+  contract_end:   "",
+  disposed_date:  "",
+};
 
 export default function VehicleModal({ open, onOpenChange, vehicle }: VehicleModalProps) {
   const router = useRouter();
@@ -29,10 +40,16 @@ export default function VehicleModal({ open, onOpenChange, vehicle }: VehicleMod
   useEffect(() => {
     if (vehicle) {
       setForm({
-        plate_number: vehicle.plate_number,
-        model:        vehicle.model,
-        purpose:      vehicle.purpose,
-        note:         vehicle.note ?? "",
+        plate_number:   vehicle.plate_number,
+        model:          vehicle.model,
+        purpose:        vehicle.purpose,
+        note:           vehicle.note ?? "",
+        ownership_type: vehicle.ownership_type ?? "자가",
+        status:         vehicle.status ?? (vehicle.is_active ? "운행중" : "매각"),
+        rental_company: vehicle.rental_company ?? "",
+        contract_start: vehicle.contract_start ?? "",
+        contract_end:   vehicle.contract_end ?? "",
+        disposed_date:  vehicle.disposed_date ?? "",
       });
     } else {
       setForm(INITIAL);
@@ -53,7 +70,12 @@ export default function VehicleModal({ open, onOpenChange, vehicle }: VehicleMod
       const res  = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          rental_company: form.ownership_type === "자가" ? null : (form.rental_company || null),
+          contract_end:   form.ownership_type === "자가" ? null : form.contract_end,
+          disposed_date:  form.status === "운행중" ? null : form.disposed_date,
+        }),
       });
       const data = await res.json();
 
@@ -117,6 +139,74 @@ export default function VehicleModal({ open, onOpenChange, vehicle }: VehicleMod
               <option value="업무용">업무용</option>
             </Select>
           </div>
+
+          {/* 소유구분 / 렌트·리스 정보 */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="ownership_type">소유구분</Label>
+              <Select
+                id="ownership_type"
+                value={form.ownership_type}
+                onChange={(e) => setForm({ ...form, ownership_type: e.target.value as Ownership })}
+              >
+                <option value="자가">자가 (회사 소유)</option>
+                <option value="렌트">렌트</option>
+                <option value="리스">리스</option>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="contract_start">
+                {form.ownership_type === "자가" ? "취득일" : "계약 시작일"}
+              </Label>
+              <Input id="contract_start" type="date" value={form.contract_start}
+                onChange={(e) => setForm({ ...form, contract_start: e.target.value })} />
+            </div>
+          </div>
+          {form.ownership_type !== "자가" && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="rental_company">{form.ownership_type}사</Label>
+                <Input id="rental_company" placeholder="예: 롯데렌탈"
+                  value={form.rental_company}
+                  onChange={(e) => setForm({ ...form, rental_company: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="contract_end">계약 만료일</Label>
+                <Input id="contract_end" type="date" value={form.contract_end}
+                  onChange={(e) => setForm({ ...form, contract_end: e.target.value })} />
+              </div>
+            </div>
+          )}
+
+          {/* 상태 (매각·반납·폐차) */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="status">상태</Label>
+              <Select
+                id="status"
+                value={form.status}
+                onChange={(e) => setForm({ ...form, status: e.target.value as Status })}
+              >
+                <option value="운행중">운행중</option>
+                <option value="매각">매각</option>
+                <option value="반납">반납 (렌트·리스 종료)</option>
+                <option value="폐차">폐차</option>
+              </Select>
+            </div>
+            {form.status !== "운행중" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="disposed_date">{form.status}일 <span className="text-destructive">*</span></Label>
+                <Input id="disposed_date" type="date" value={form.disposed_date} required
+                  onChange={(e) => setForm({ ...form, disposed_date: e.target.value })} />
+              </div>
+            )}
+          </div>
+          {form.status !== "운행중" && (
+            <p className="text-xs text-amber-700 bg-amber-50 rounded px-3 py-2">
+              {form.status} 처리하면 운전자 앱에서 이 차량이 숨겨지고 사용자 이력이 종료됩니다.
+              과거 운행기록과 운행기록부는 그대로 보존·조회됩니다.
+            </p>
+          )}
 
           {/* 비고 */}
           <div className="space-y-1.5">

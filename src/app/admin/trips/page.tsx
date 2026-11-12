@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { kstMonthRange } from "@/lib/utils";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import TripFilters from "./_components/TripFilters";
@@ -42,8 +43,7 @@ export default async function AdminTripsPage({ searchParams }: Props) {
   // 월 필터
   if (searchParams.month) {
     const [y, m]  = searchParams.month.split("-").map(Number);
-    const from    = new Date(y, m - 1, 1).toISOString();
-    const to      = new Date(y, m, 1).toISOString();
+    const { from, to } = kstMonthRange(y, m);
     query = query.gte("departure_time", from).lt("departure_time", to);
   }
   if (searchParams.vehicle_id) query = query.eq("vehicle_id", searchParams.vehicle_id);
@@ -57,9 +57,10 @@ export default async function AdminTripsPage({ searchParams }: Props) {
 
   if (searchParams.month) {
     const [y, m] = searchParams.month.split("-").map(Number);
+    const { from, to } = kstMonthRange(y, m);
     summaryQuery = summaryQuery
-      .gte("departure_time", new Date(y, m - 1, 1).toISOString())
-      .lt("departure_time",  new Date(y, m, 1).toISOString());
+      .gte("departure_time", from)
+      .lt("departure_time",  to);
   }
   if (searchParams.vehicle_id) summaryQuery = summaryQuery.eq("vehicle_id", searchParams.vehicle_id);
   if (searchParams.driver_id)  summaryQuery = summaryQuery.eq("driver_id", searchParams.driver_id);

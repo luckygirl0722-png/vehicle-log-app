@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { kstMonthRange, kstNow } from "@/lib/utils";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 
@@ -12,9 +13,8 @@ export default async function MobileHomePage() {
   const { data: driver } = await supabase
     .from("drivers").select("id, name").eq("user_id", user.id).single();
 
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+  const now = kstNow(); // 로컬 필드 = KST
+  const { from: monthStart, to: monthEnd } = kstMonthRange(now.getFullYear(), now.getMonth() + 1);
 
   // activeTrip + monthlyStats 병렬 조회
   const [activeTripRes, monthlyStatsRes] = driver

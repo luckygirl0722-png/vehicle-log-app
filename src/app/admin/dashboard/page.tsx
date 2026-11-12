@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { kstMonthRange, kstNow, kstYearMonth } from "@/lib/utils";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import KpiCards from "./_components/KpiCards";
@@ -24,14 +25,13 @@ export default async function AdminDashboardPage({ searchParams }: Props) {
     .from("user_roles").select("role").eq("user_id", user.id).single();
   if (roleRow?.role !== "admin") redirect("/");
 
-  const now = new Date();
+  const now = kstNow(); // 로컬 필드 = KST
 
   // ── 집계용 선택 월 (stats_month=YYYY-MM, 기본=이번 달) ──
   const statsDate = searchParams.stats_month
     ? new Date(searchParams.stats_month + "-01")
     : new Date(now.getFullYear(), now.getMonth(), 1);
-  const statsMonthStart = new Date(statsDate.getFullYear(), statsDate.getMonth(),     1).toISOString();
-  const statsMonthEnd   = new Date(statsDate.getFullYear(), statsDate.getMonth() + 1, 1).toISOString();
+  const { from: statsMonthStart, to: statsMonthEnd } = kstMonthRange(statsDate.getFullYear(), statsDate.getMonth() + 1);
   const statsMonthLabel = statsDate.toLocaleDateString("ko-KR", { year: "numeric", month: "long" });
   const statsMonthParam = `${statsDate.getFullYear()}-${String(statsDate.getMonth()+1).padStart(2,"0")}`;
   const prevStatsDate   = new Date(statsDate.getFullYear(), statsDate.getMonth() - 1, 1);
@@ -39,10 +39,11 @@ export default async function AdminDashboardPage({ searchParams }: Props) {
   const prevStatsParam  = `${prevStatsDate.getFullYear()}-${String(prevStatsDate.getMonth()+1).padStart(2,"0")}`;
   const nextStatsParam  = `${nextStatsDate.getFullYear()}-${String(nextStatsDate.getMonth()+1).padStart(2,"0")}`;
 
-  const curMonthStart  = new Date(now.getFullYear(), now.getMonth(),     1).toISOString();
-  const curMonthEnd    = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
-  const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
-  const sixMonthsAgo   = new Date(now.getFullYear(), now.getMonth() - 5, 1).toISOString();
+  const _pm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const _6m = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+  const { from: curMonthStart, to: curMonthEnd } = kstMonthRange(now.getFullYear(), now.getMonth() + 1);
+  const prevMonthStart = kstMonthRange(_pm.getFullYear(), _pm.getMonth() + 1).from;
+  const sixMonthsAgo   = kstMonthRange(_6m.getFullYear(), _6m.getMonth() + 1).from;
 
   const [
     { data: curRows },
@@ -66,7 +67,8 @@ export default async function AdminDashboardPage({ searchParams }: Props) {
     supabase.from("trip_logs")
       .select("id, status, departure_time, departure_location, arrival_location, distance_km, vehicles(plate_number), drivers(name)")
       .order("departure_time", { ascending: false }).limit(5),
-    supabase.from("vehicles").select("id, plate_number, model").eq("is_active", true).order("plate_number"),
+    // 매각·반납 차량도 해당 월 운행이 있으면 집계에 포함 (아래 totalKm > 0 필터로 빈 차량 제외)
+    supabase.from("vehicles").select("id, plate_number, model").order("plate_number"),
     // 차량별 업무/출퇴근 집계용 (선택 월)
     supabase.from("trip_logs")
       .select("vehicle_id, distance_km, toll_fee, trip_type")
@@ -100,8 +102,7 @@ export default async function AdminDashboardPage({ searchParams }: Props) {
     monthlyMap[`${d.getMonth()+1}월`] = { distance: 0, toll: 0 };
   }
   monthlyRows?.forEach(row => {
-    const d = new Date(row.departure_time);
-    const k = `${d.getMonth()+1}월`;
+    const k = `${kstYearMonth(row.departure_time).m}월`;
     if (monthlyMap[k]) {
       monthlyMap[k].distance += row.distance_km ?? 0;
       monthlyMap[k].toll     += row.toll_fee ?? 0;

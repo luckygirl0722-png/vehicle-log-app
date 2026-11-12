@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { kstMonthRange, kstNow } from "@/lib/utils";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import Link from "next/link";
@@ -44,12 +45,11 @@ export default async function VehicleTripsPage({ searchParams }: Props) {
   if (!user) redirect("/login");
 
   // ── 날짜 계산 (DB 쿼리 전에 미리) ──
-  const now           = new Date();
+  const now           = kstNow(); // 로컬 필드 = KST
   const selectedMonth = searchParams.month
     ? new Date(searchParams.month + "-01")
     : new Date(now.getFullYear(), now.getMonth(), 1);
-  const monthStart    = selectedMonth.toISOString();
-  const monthEnd      = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1).toISOString();
+  const { from: monthStart, to: monthEnd } = kstMonthRange(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1);
   const prevMonth     = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() - 1, 1);
   const nextMonth     = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1);
   const prevParam     = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, "0")}`;

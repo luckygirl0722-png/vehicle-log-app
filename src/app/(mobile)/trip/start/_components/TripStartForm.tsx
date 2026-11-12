@@ -6,10 +6,11 @@ import LocationAutocomplete, { saveLocationHistory } from "@/app/(mobile)/_compo
 interface Vehicle { id: string; plate_number: string; model: string; }
 interface Driver  { id: string; name: string; }
 interface Props   {
-  vehicles:       Vehicle[];
+  vehicles:       Vehicle[];          // 우선순위 순으로 정렬되어 전달됨 (0번 = 기본 선택)
   driver:         Driver;
   lastKmMap:      Record<string, number>;
   quickLocations: string[];
+  preferredVehicleId?: string | null; // 운전자가 지정한 주 사용 차량
 }
 
 const PURPOSES: Record<string, string[]> = {
@@ -41,7 +42,7 @@ function getRecentLocations(exclude: string[], max = 5): string[] {
   } catch { return []; }
 }
 
-export default function TripStartForm({ vehicles, driver, lastKmMap, quickLocations }: Props) {
+export default function TripStartForm({ vehicles, driver, lastKmMap, quickLocations, preferredVehicleId = null }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError]      = useState<string | null>(null);
@@ -59,6 +60,24 @@ export default function TripStartForm({ vehicles, driver, lastKmMap, quickLocati
     departure_time_val: toLocalTimeString(now),
   });
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+  const [preferredId, setPreferredId] = useState<string | null>(preferredVehicleId);
+  const [prefMsg, setPrefMsg]         = useState<string | null>(null);
+
+  /** 현재 선택 차량을 주 사용 차량으로 지정/해제 */
+  async function togglePreferred() {
+    const next = preferredId === form.vehicle_id ? null : form.vehicle_id;
+    setPrefMsg(null);
+    const res = await fetch("/api/me/preferred-vehicle", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vehicle_id: next }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { setPrefMsg(data.error ?? "저장 실패"); return; }
+    setPreferredId(next);
+    setPrefMsg(next ? "주 사용 차량으로 지정했습니다" : "주 사용 차량 지정을 해제했습니다");
+    setTimeout(() => setPrefMsg(null), 2000);
+  }
 
   // 최근 위치 이력 불러오기
   useEffect(() => {
@@ -173,16 +192,33 @@ export default function TripStartForm({ vehicles, driver, lastKmMap, quickLocati
               <span className="ml-1.5 text-xs text-muted-foreground font-normal">{vehicles[0].model}</span>
             </span>
           ) : (
-            <select
-              value={form.vehicle_id}
-              onChange={e => handleVehicleSelect(e.target.value)}
-              className="flex-1 bg-transparent text-sm font-medium focus:outline-none cursor-pointer">
-              {vehicles.map(v => (
-                <option key={v.id} value={v.id}>{v.plate_number} ({v.model})</option>
-              ))}
-            </select>
+            <>
+              <select
+                value={form.vehicle_id}
+                onChange={e => handleVehicleSelect(e.target.value)}
+                className="flex-1 min-w-0 bg-transparent text-sm font-medium focus:outline-none cursor-pointer">
+                {vehicles.map((v, i) => (
+                  <option key={v.id} value={v.id}>
+                    {v.id === preferredId ? "★ " : `${i + 1}. `}{v.plate_number} ({v.model})
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={togglePreferred}
+                title="주 사용 차량 지정"
+                className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors
+                  ${preferredId === form.vehicle_id
+                    ? "bg-amber-50 border-amber-300 text-amber-700"
+                    : "border-border text-muted-foreground hover:bg-muted"}`}>
+                {preferredId === form.vehicle_id ? "★ 주 사용" : "☆ 주 사용 지정"}
+              </button>
+            </>
           )}
         </div>
+        {prefMsg && (
+          <p className="px-4 py-2 text-xs text-amber-700 bg-amber-50">{prefMsg}</p>
+        )}
 
         {/* 출발지 */}
         <div className="flex items-start px-4 py-3 gap-3">

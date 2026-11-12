@@ -3,7 +3,7 @@ import { z } from "zod";
 /** 차량번호 정규식: 숫자2-3자리 + 한글1자 + 숫자4자리 (예: 12가3456, 123나4567) */
 const plateRegex = /^\d{2,3}[가-힣]\d{4}$/;
 
-export const VehicleCreateSchema = z.object({
+export const VehicleCreateBase = z.object({
   plate_number: z
     .string()
     .min(1, "차량번호를 입력하세요.")
@@ -18,9 +18,28 @@ export const VehicleCreateSchema = z.object({
   note: z.string().max(200, "비고는 200자 이내로 입력하세요.").optional(),
 });
 
-export const VehicleUpdateSchema = VehicleCreateSchema.partial().extend({
-  is_active: z.boolean().optional(),
+const dateOrNull = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "날짜 형식은 YYYY-MM-DD 입니다.")
+  .nullable()
+  .optional()
+  .or(z.literal("").transform(() => null));
+
+/** 소유구분·상태 (003 마이그레이션) */
+export const VehicleStatusFields = z.object({
+  ownership_type: z.enum(["자가", "렌트", "리스"]).optional(),
+  status:         z.enum(["운행중", "매각", "반납", "폐차"]).optional(),
+  rental_company: z.string().max(50).nullable().optional(),
+  contract_start: dateOrNull,
+  contract_end:   dateOrNull,
+  disposed_date:  dateOrNull,
 });
+
+export const VehicleCreateSchema = VehicleCreateBase.merge(VehicleStatusFields);
+
+export const VehicleUpdateSchema = VehicleCreateBase.partial()
+  .merge(VehicleStatusFields)
+  .extend({ is_active: z.boolean().optional() });
 
 export type VehicleCreateInput = z.infer<typeof VehicleCreateSchema>;
 export type VehicleUpdateInput = z.infer<typeof VehicleUpdateSchema>;

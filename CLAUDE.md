@@ -15,7 +15,7 @@
 | **사용자** | 운전자(모바일 PWA) + 관리자(웹) |
 | **배포 URL** | https://vehicle-log-app-two.vercel.app |
 | **관리자 계정** | claude_2@samwooeleco.com |
-| **마지막 업데이트** | 2026-06-23 (2차) |
+| **마지막 업데이트** | 2026-11-12 |
 
 ---
 
@@ -293,6 +293,24 @@ CREATE POLICY "audit_logs: 관리자만 조회"
 | EXT_59 | 수정 모드 출발 정보(일시·출발지·km·유형·목적) 편집 가능 | ✅ 완료 |
 
 **전체 진행률: 74개 중 73개 완료 (1개 SQL 실행 대기)**
+
+
+### Phase 21 — KST 월 경계 버그 수정 & 차량 우선순위·렌트/매각·사용자 이력 (2026-11-12)
+
+| EXT | 이름 | 상태 |
+|-----|------|------|
+| EXT_105 | 월 필터 KST 기준으로 통일 (`kstMonthRange`) — 운행현황·Excel·PDF·집계·대시보드·모바일 14개 파일. 매월 1일 00~09시 기록 누락 해결 | ✅ 완료 |
+| EXT_106 | 대시보드 최근 운행기록 날짜 KST 표시 (RecentTrips timeZone) | ✅ 완료 |
+| EXT_107 | 출발 km 자동입력 — 차량별 개별 조회 (km 큰 차량이 limit 를 독점해 신규차량 누락되던 버그) | ✅ 완료 |
+| EXT_108 | 운전자별 차량 우선순위 — 관리자 순위(vehicle_drivers.priority) + 운전자 주 사용 차량(drivers.preferred_vehicle_id) | ✅ 완료 |
+| EXT_109 | 차량 소유구분(자가/렌트/리스)·상태(운행중/매각/반납/폐차)·계약일·처분일 | ✅ 완료 |
+| EXT_110 | 차량 사용자 변경 이력 (vehicle_driver_history) — 배정/해제 기준일 기록 | ✅ 완료 |
+| EXT_111 | `003_vehicle_status_priority_history.sql` Supabase SQL Editor 실행 | ✅ 완료 (2026-11-12) |
+
+- 신규 API: `PATCH /api/vehicles/[id]/drivers`(순위), `GET /api/vehicles/[id]/history`, `PATCH /api/me/preferred-vehicle`
+- 운행시작 차량 정렬: ① 운전자 주 사용 차량(★) → ② 관리자 순위 → ③ 차량번호
+- 매각·반납·폐차: is_active=false 로 운전자 앱에서 숨김, 진행 중 이력 종료, 배정·운행기록은 보존 (삭제 금지 안내)
+- ⚠️ 서버 날짜 규칙: 월 범위는 반드시 `kstMonthRange(y, m)` 사용, "오늘"은 `kstNow()` 사용
 
 ---
 

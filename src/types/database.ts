@@ -48,6 +48,13 @@ export interface Vehicle {
   is_active: boolean;         // 운행 가능 여부
   note: string | null;
   created_at: string;
+  // ── 003 마이그레이션 (2026-11) ──
+  ownership_type?: "자가" | "렌트" | "리스";
+  status?: "운행중" | "매각" | "반납" | "폐차";
+  rental_company?: string | null;
+  contract_start?: string | null;  // YYYY-MM-DD
+  contract_end?: string | null;    // YYYY-MM-DD
+  disposed_date?: string | null;   // YYYY-MM-DD (매각·반납·폐차일)
 }
 
 /* ── 운전자 ── */

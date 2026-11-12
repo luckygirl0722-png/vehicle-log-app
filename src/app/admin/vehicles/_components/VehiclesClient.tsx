@@ -3,7 +3,6 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import VehicleModal from "./VehicleModal";
 import BulkImportVehicleModal, { type BulkVehicleItem } from "./BulkImportVehicleModal";
 import AssignDriverModal from "./AssignDriverModal";
@@ -49,8 +48,21 @@ interface VehiclesClientProps {
   driversByVehicle: Record<string, string[]>;
 }
 
-export default function VehiclesClient({ vehicles, allDrivers, driversByVehicle }: VehiclesClientProps) {
+/** 차량 상태 (003 마이그레이션 전이면 is_active 로 추정) */
+const vStatus = (v: Vehicle) => v.status ?? (v.is_active ? "운행중" : "매각");
+
+const STATUS_STYLE: Record<string, string> = {
+  "운행중": "bg-emerald-50 border-emerald-200 text-emerald-700",
+  "매각":   "bg-gray-100 border-gray-300 text-gray-600",
+  "반납":   "bg-gray-100 border-gray-300 text-gray-600",
+  "폐차":   "bg-gray-100 border-gray-300 text-gray-600",
+};
+
+export default function VehiclesClient({ vehicles: allVehicles, allDrivers, driversByVehicle }: VehiclesClientProps) {
   const router = useRouter();
+  const [showDisposed, setShowDisposed] = useState(false);
+  const disposedCount = allVehicles.filter(v => vStatus(v) !== "운행중").length;
+  const vehicles = showDisposed ? allVehicles : allVehicles.filter(v => vStatus(v) === "운행중");
   const [isPending, startTransition] = useTransition();
 
   const [modalOpen, setModalOpen]   = useState(false);
@@ -99,8 +111,8 @@ export default function VehiclesClient({ vehicles, allDrivers, driversByVehicle 
 
   const selectedPlates = vehicles.filter(v => checkedIds.has(v.id)).map(v => v.plate_number).join(", ");
 
-  // 배정 운전자 없는 차량 수
-  const unassignedCount = vehicles.filter(v => !(driversByVehicle[v.id]?.length > 0)).length;
+  // 배정 운전자 없는 차량 수 (운행중 차량 기준)
+  const unassignedCount = vehicles.filter(v => vStatus(v) === "운행중" && !(driversByVehicle[v.id]?.length > 0)).length;
 
   return (
     <>
@@ -109,7 +121,8 @@ export default function VehiclesClient({ vehicles, allDrivers, driversByVehicle 
         <div>
           <h1 className="text-2xl font-bold">차량 관리</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            총 {vehicles.length}대
+            운행중 {allVehicles.length - disposedCount}대
+            {disposedCount > 0 && <span className="ml-2">· 매각·반납·폐차 {disposedCount}대</span>}
             {unassignedCount > 0 && (
               <span className="ml-2 text-amber-600">· 운전자 미배정 {unassignedCount}대</span>
             )}
@@ -130,6 +143,11 @@ export default function VehiclesClient({ vehicles, allDrivers, driversByVehicle 
 
       {/* 범례 */}
       <div className="flex items-center gap-4 mb-4 text-xs text-muted-foreground">
+        <label className="flex items-center gap-1.5 cursor-pointer mr-2">
+          <input type="checkbox" checked={showDisposed} onChange={e => setShowDisposed(e.target.checked)}
+            className="w-3.5 h-3.5" />
+          매각·반납·폐차 차량 포함
+        </label>
         <span className="flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />운전자 배정 완료
         </span>
@@ -175,11 +193,22 @@ export default function VehiclesClient({ vehicles, allDrivers, driversByVehicle 
                         className="rounded border-border cursor-pointer w-4 h-4" />
                     </td>
                     <td className="px-4 py-3 font-medium">{v.plate_number}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{v.model}</td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {v.model}
+                      {v.ownership_type && v.ownership_type !== "자가" && (
+                        <span className="ml-1.5 inline-flex items-center rounded border border-blue-200 bg-blue-50 px-1.5 text-[11px] text-blue-700"
+                          title={[v.rental_company, v.contract_end && `만료 ${v.contract_end}`].filter(Boolean).join(" · ")}>
+                          {v.ownership_type}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
-                      <Badge variant={v.is_active ? "success" : "outline"}>
-                        {v.is_active ? "운행중" : "비활성"}
-                      </Badge>
+                      <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLE[vStatus(v)]}`}>
+                        {vStatus(v)}
+                        {v.disposed_date && vStatus(v) !== "운행중" && (
+                          <span className="ml-1 font-normal">({v.disposed_date})</span>
+                        )}
+                      </span>
                     </td>
                     <td className="px-4 py-3">
                       {hasDrivers ? (
@@ -217,6 +246,10 @@ export default function VehiclesClient({ vehicles, allDrivers, driversByVehicle 
             <h2 className="text-lg font-bold">차량 삭제 확인</h2>
             <p className="text-sm text-muted-foreground">
               아래 <strong>{checkedIds.size}대</strong>와 모든 운행 기록이 <strong className="text-destructive">영구 삭제</strong>됩니다.
+            </p>
+            <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+              매각·렌트 반납 차량은 삭제하지 말고 [수정] → 상태를 &lsquo;매각/반납&rsquo;으로 변경하세요.
+              세무용 운행기록이 보존됩니다.
             </p>
             <div className="rounded-xl bg-muted px-4 py-3 text-sm max-h-32 overflow-y-auto">{selectedPlates}</div>
             {deleteMsg && (
